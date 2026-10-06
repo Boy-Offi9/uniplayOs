@@ -95,8 +95,7 @@ Go to `http://localhost:3000/test.html` — this is the dev testing page.
 
 Paste any media URL into the input and hit Load. The panel shows:
 
-- what the resolver detected (type, extension, whether it goes through the proxy)
-- the resolved/proxy URL
+- what the resolver detected (type, extension, whether it goes through the proxy)- the resolved/proxy URL
 - live playback state (buffering, stalled, errors, resolution, duration)
 - a timestamped log of every event
 
@@ -205,20 +204,3 @@ Deploy steps and details live in the [UniplayOsproxy](https://github.com/unitede
 ## Contributing
 
 PRs welcome. Fork the repo, branch off `main`, and open a pull request describing what changed and why.
-
-## Lostboy Contribution
-
-Redesign of `public/index.html` — landing page only, no logic touched.
-
-- Rebuilt the layout with staggered entrance animations (`rise`, `underline`, `pulse` keyframes) instead of a static page, kept the exact same color tokens (`--bg`, `--accent`, `--muted`, etc.) so it still matches the player
-- Swapped every icon for Font Awesome (`fa-play`, `fa-flask`, `fa-file-video`, `fa-tower-broadcast`, `fa-diagram-project`, `fa-code`) — no emoji anywhere
-- Added a live status badge with a pulsing dot, a two-button hero (Launch Player / Try the Resolver), and a four-item capability grid (MP4/WebM, HLS, DASH, Embeddable)
-- Full responsive pass: 4-column feature grid collapses to 2 columns under 768px, action buttons stack full-width under 420px
-- Respects `prefers-reduced-motion` — animations and transitions drop out entirely for users who ask for it
-- Added proper SEO/meta: `<meta name="description">`, `<meta name="keywords">`, canonical link, Open Graph and Twitter card tags, and a `SoftwareApplication` JSON-LD block so the page is actually indexable and shareable
-- Added a subtle SVG-based noise texture and radial accent glows in the background for depth, all done in pure CSS, no extra image assets
-- Footer now links out to the GitHub repo instead of dead-ending
-
-## License
-
-[MIT](./LICENSE)
