@@ -338,6 +338,8 @@
     }
     button:active { transform: translateY(0) scale(0.92); }
     button:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+    button:disabled { opacity: 0.35; cursor: default; pointer-events: none; }
+    [hidden] { display: none !important; }
 
     #time {
       font-size: 0.8rem;
@@ -638,9 +640,11 @@
       <input type="range" id="seek-slider" min="0" max="100" value="0" step="0.01" aria-label="Seek">
     </div>
     <div id="ctrl-row">
+      <button id="btn-prev" aria-label="Previous" hidden><i class="fa-solid fa-backward-fast"></i></button>
       <button id="btn-play" aria-label="Play/Pause"><i class="fa-solid fa-play"></i></button>
       <button id="btn-rewind" aria-label="Rewind 10s"><i class="fa-solid fa-backward-step"></i></button>
       <button id="btn-forward" aria-label="Forward 10s"><i class="fa-solid fa-forward-step"></i></button>
+      <button id="btn-next" aria-label="Next" hidden><i class="fa-solid fa-forward-fast"></i></button>
       <span id="time">0:00 / 0:00</span>
       
       <div class="spacer"></div>
@@ -694,6 +698,8 @@
     const status = document.getElementById('status');
     const debugBar = document.getElementById('debug-bar');
     const loader = document.getElementById('loader');
+    const btnPrev = document.getElementById('btn-prev');
+    const btnNext = document.getElementById('btn-next');
 
     let hlsInstance = null;
     let dashInstance = null;
@@ -709,6 +715,10 @@
     let isDebugMode = false;
     let loadTimeout = null;
     let waitingTimeout = null;
+    let mediaReady = false;
+    let listenerAbort = null;
+    let playlist = [];
+    let playlistIndex = 0;
 
     const HISTORY_KEY = 'history';
     const HISTORY_MAX_ENTRIES = 50;
@@ -858,8 +868,11 @@
     }
 
     function destroyInstances() {
+      if (listenerAbort) { listenerAbort.abort(); listenerAbort = null; }
       if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
       if (dashInstance) { dashInstance.reset(); dashInstance = null; }
+      video.removeAttribute('src');
+      video.load();
       stopEmbedPolling();
       if (ytPlayer) {
         try { ytPlayer.destroy(); } catch (err) {}
@@ -918,18 +931,8 @@
       if (p !== undefined) p.catch(() => {});
     }
 
-    function extractYouTubeId(url) {
-      const match = url.match(/(?:v=|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{11})/);
-      return match ? match[1] : null;
-    }
-
-    function extractVimeoId(url) {
-      const match = url.match(/vimeo\.com\/(\d+)/);
-      return match ? match[1] : null;
-    }
-
     function loadYouTube(rawUrl, autoplay, resumeState) {
-      const videoId = extractYouTubeId(rawUrl);
+      const videoId = Utils.extractYouTubeId(rawUrl);
       if (!videoId) {
         showLoader(false);
         if (loadTimeout) clearTimeout(loadTimeout);
@@ -976,6 +979,7 @@
                 sendEmbedEvent('ended');
                 if (currentSourceUrl) removeHistoryEntry(currentSourceUrl);
                 stopEmbedPolling();
+                advanceAfterEnd();
               }
             },
             onError: () => {
@@ -990,15 +994,15 @@
     }
 
     function loadVimeo(rawUrl, autoplay, resumeState) {
-      const videoId = extractVimeoId(rawUrl);
-      if (!videoId) {
+      const vimeo = Utils.parseVimeo(rawUrl);
+      if (!vimeo) {
         showLoader(false);
         if (loadTimeout) clearTimeout(loadTimeout);
         if (isDebugMode) setStatus('Invalid Vimeo URL');
         return;
       }
 
-      vimeoPlayer = new Vimeo.Player(embedFrame, { id: videoId, autoplay, responsive: true });
+      vimeoPlayer = new Vimeo.Player(embedFrame, { ...(vimeo.hash ? { url: vimeo.url } : { id: vimeo.id }), autoplay, responsive: true });
 
       vimeoPlayer.on('play', () => {
         setPlayingUI(true);
@@ -1016,6 +1020,7 @@
         sendEmbedEvent('ended');
         if (currentSourceUrl) removeHistoryEntry(currentSourceUrl);
         stopEmbedPolling();
+        advanceAfterEnd();
       });
 
       vimeoPlayer.ready()
@@ -1053,6 +1058,8 @@
     function loadUrl(rawUrl, autoplay = false) {
       if (!rawUrl) return;
       destroyInstances();
+      listenerAbort = new AbortController();
+      mediaReady = false;
       isReadySent = false;
       showLoader(true);
       currentSourceUrl = null;
@@ -1108,6 +1115,7 @@
         currentSourceUrl = rawUrl;
 
         const onMediaReady = () => {
+          mediaReady = true;
           showLoader(false);
           if (loadTimeout) clearTimeout(loadTimeout);
           if (isDebugMode) setStatus('');
@@ -1132,20 +1140,37 @@
         let fallbackIndex = 0;
 
         function loadNative(srcUrl) {
+          const signal = listenerAbort ? listenerAbort.signal : undefined;
           video.src = srcUrl;
-          video.addEventListener('loadedmetadata', onMediaReady, { once: true });
-          video.addEventListener('error', () => handleFailure('Failed to load media'), { once: true });
+          video.addEventListener('loadedmetadata', onMediaReady, { once: true, signal });
+          video.addEventListener('error', () => {
+            if (!mediaReady) handleFailure('Failed to load media');
+          }, { once: true, signal });
           if (autoplay) safePlay();
         }
 
         function loadHls(srcUrl) {
           if (Hls.isSupported()) {
-            hlsInstance = new Hls();
-            hlsInstance.loadSource(srcUrl);
-            hlsInstance.attachMedia(video);
-            hlsInstance.on(Hls.Events.MANIFEST_PARSED, onMediaReady);
-            hlsInstance.on(Hls.Events.ERROR, (_, data) => {
-              if (data.fatal) handleFailure('HLS fatal error');
+            const hls = new Hls();
+            hlsInstance = hls;
+            let networkRetries = 0;
+            let mediaRetries = 0;
+            hls.loadSource(srcUrl);
+            hls.attachMedia(video);
+            hls.on(Hls.Events.MANIFEST_PARSED, onMediaReady);
+            hls.on(Hls.Events.ERROR, (_, data) => {
+              if (!data.fatal) return;
+              if (data.type === Hls.ErrorTypes.NETWORK_ERROR && mediaReady && networkRetries < 3) {
+                networkRetries += 1;
+                hls.startLoad();
+                return;
+              }
+              if (data.type === Hls.ErrorTypes.MEDIA_ERROR && mediaRetries < 2) {
+                mediaRetries += 1;
+                hls.recoverMediaError();
+                return;
+              }
+              handleFailure('HLS fatal error');
             });
           } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
             loadNative(srcUrl);
@@ -1163,6 +1188,7 @@
 
         function handleFailure(msg) {
           destroyInstances();
+          listenerAbort = new AbortController();
           fallbackIndex += 1;
           const nextStep = result.fallbackChain[fallbackIndex];
 
@@ -1255,6 +1281,47 @@
       }
     }
 
+    function updatePlaylistUI() {
+      const multi = playlist.length > 1;
+      btnPrev.hidden = !multi;
+      btnNext.hidden = !multi;
+      btnPrev.disabled = playlistIndex <= 0;
+      btnNext.disabled = playlistIndex >= playlist.length - 1;
+    }
+
+    function playTrack(autoplay) {
+      const source = playlist[playlistIndex];
+      urlInput.value = source;
+      updatePlaylistUI();
+      if (playlist.length > 1) {
+        sendEmbedEvent('trackchange', { index: playlistIndex, source, total: playlist.length });
+      }
+      loadUrl(source, autoplay);
+    }
+
+    function playNext(autoplay) {
+      if (playlistIndex + 1 >= playlist.length) return;
+      playlistIndex += 1;
+      playTrack(autoplay);
+    }
+
+    function playPrevious() {
+      if (playlistIndex <= 0) return;
+      playlistIndex -= 1;
+      playTrack(true);
+    }
+
+    function loadSingle(url, autoplay) {
+      if (!url) return;
+      playlist = [url];
+      playlistIndex = 0;
+      playTrack(autoplay);
+    }
+
+    function advanceAfterEnd() {
+      setTimeout(() => playNext(true), 0);
+    }
+
     function setIcon(btn, icon) {
       const i = btn.querySelector('i');
       if (i) i.className = `fa-solid fa-${icon}`;
@@ -1287,8 +1354,10 @@
     video.addEventListener('ended', () => {
       sendEmbedEvent('ended');
       if (currentSourceUrl) removeHistoryEntry(currentSourceUrl);
+      advanceAfterEnd();
     });
     video.addEventListener('error', () => {
+      if (!mediaReady && playbackMode === 'native') return;
       showLoader(false);
       if (loadTimeout) clearTimeout(loadTimeout);
       if (isDebugMode) setStatus('Failed to load media.');
@@ -1485,8 +1554,10 @@
     });
     window.addEventListener('beforeunload', () => persistProgress(true));
 
-    urlLoad.addEventListener('click', () => loadUrl(urlInput.value.trim()));
-    urlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') loadUrl(urlInput.value.trim()); });
+    urlLoad.addEventListener('click', () => loadSingle(urlInput.value.trim(), false));
+    urlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') loadSingle(urlInput.value.trim(), false); });
+    btnPrev.addEventListener('click', playPrevious);
+    btnNext.addEventListener('click', () => playNext(true));
 
     const params = new URLSearchParams(window.location.search);
     const sourceParam = params.get('source') || params.get('url');
@@ -1497,9 +1568,26 @@
       setDebugMode(true);
     }
 
-    if (sourceParam) {
-      urlInput.value = sourceParam;
-      loadUrl(sourceParam, autoplayParam);
+    if (params.get('downloads') === 'false' && btnDownload) {
+      btnDownload.hidden = true;
+    }
+
+    const initialSources = [];
+    try {
+      const parsedSources = JSON.parse(params.get('sources') || '[]');
+      if (Array.isArray(parsedSources)) {
+        parsedSources.forEach((item) => {
+          const value = typeof item === 'string' ? item : (item && (item.source || item.src || item.url));
+          if (typeof value === 'string' && value.trim()) initialSources.push(value.trim());
+        });
+      }
+    } catch (err) {}
+    if (sourceParam && !initialSources.includes(sourceParam)) initialSources.unshift(sourceParam);
+
+    if (initialSources.length) {
+      playlist = initialSources;
+      playlistIndex = Math.max(0, initialSources.indexOf(sourceParam));
+      playTrack(autoplayParam);
     } else {
       setTimeout(() => {
         sendReadyIfNeeded();
@@ -1509,6 +1597,7 @@
     }
 
     window.addEventListener('message', (event) => {
+      if (event.source !== window.parent) return;
       const data = event.data;
       if (!data || data.type !== 'uniplayos') return;
       switch (data.action) {
@@ -1571,7 +1660,9 @@
             if (document.exitFullscreen) document.exitFullscreen();
           }
           break;
-        case 'load': if (data.source) loadUrl(data.source, false); break;
+        case 'load': if (data.source) loadSingle(data.source, false); break;
+        case 'next': playNext(true); break;
+        case 'previous': playPrevious(); break;
         case 'destroy':
           persistProgress(true);
           destroyInstances();

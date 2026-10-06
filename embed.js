@@ -14,8 +14,11 @@ class UniplayOSEmbed {
     this.onPause = options.onPause || null;
     this.onEnded = options.onEnded || null;
     this.onError = options.onError || null;
+    this.onTimeUpdate = options.onTimeUpdate || null;
+    this.onTrackChange = options.onTrackChange || null;
     
     this.iframe = null;
+    this.messageHandler = null;
     this.isReady = false;
     
     this.init();
@@ -65,9 +68,7 @@ class UniplayOSEmbed {
       params.set('theme', this.theme);
     }
     
-    if (this.allowDownloads) {
-      params.set('downloads', 'true');
-    }
+    params.set('downloads', this.allowDownloads ? 'true' : 'false');
     
     if (this.autoplay) {
       params.set('autoplay', 'true');
@@ -83,7 +84,7 @@ class UniplayOSEmbed {
   }
   
   setupMessageListener() {
-    window.addEventListener('message', (event) => {
+    this.messageHandler = (event) => {
       if (event.origin !== this.playerOrigin) return;
       if (event.source !== this.iframe?.contentWindow) return;
 
@@ -108,12 +109,19 @@ class UniplayOSEmbed {
           if (this.onError) this.onError(data);
           break;
         case 'timeupdate':
+          if (this.onTimeUpdate) this.onTimeUpdate(data);
+          break;
+        case 'trackchange':
+          this.source = data.source;
+          if (this.onTrackChange) this.onTrackChange(data);
           break;
         case 'download':
           console.log('Download started:', data.url);
           break;
       }
-    });
+    };
+
+    window.addEventListener('message', this.messageHandler);
   }
   
   postMessage(action, data = {}) {
@@ -153,6 +161,22 @@ class UniplayOSEmbed {
   toggleFullscreen() {
     this.postMessage('toggleFullscreen');
   }
+
+  setPlaybackRate(rate) {
+    this.postMessage('setPlaybackRate', { rate });
+  }
+
+  setDebug(enabled) {
+    this.postMessage('setDebug', { enabled });
+  }
+
+  next() {
+    this.postMessage('next');
+  }
+
+  previous() {
+    this.postMessage('previous');
+  }
   
   load(source) {
     this.source = source;
@@ -161,6 +185,10 @@ class UniplayOSEmbed {
   
   destroy() {
     this.postMessage('destroy');
+    if (this.messageHandler) {
+      window.removeEventListener('message', this.messageHandler);
+      this.messageHandler = null;
+    }
     const container = document.querySelector(this.container);
     if (container) {
       container.innerHTML = '';

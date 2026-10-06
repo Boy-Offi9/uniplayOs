@@ -80,33 +80,72 @@ class Utils {
     return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico', 'tiff'].includes(ext);
   }
   
+  static extractYouTubeId(url) {
+    let parsed;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return null;
+    }
+
+    const host = parsed.hostname.toLowerCase().replace(/^(www|m|music)\./, '');
+    let id = null;
+
+    if (host === 'youtu.be') {
+      id = parsed.pathname.split('/')[1];
+    } else if (host === 'youtube.com' || host === 'youtube-nocookie.com') {
+      if (parsed.pathname === '/watch') {
+        id = parsed.searchParams.get('v');
+      } else {
+        const match = parsed.pathname.match(/^\/(?:embed|shorts|live|v)\/([^/?#]+)/);
+        id = match ? match[1] : null;
+      }
+    }
+
+    return id && /^[\w-]{11}$/.test(id) ? id : null;
+  }
+
+  static parseVimeo(url) {
+    let parsed;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return null;
+    }
+
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+    if (host !== 'vimeo.com' && host !== 'player.vimeo.com') return null;
+
+    const segments = parsed.pathname.split('/').filter(Boolean);
+    const idIndex = segments.findIndex((segment) => /^\d+$/.test(segment));
+    if (idIndex === -1) return null;
+
+    const id = segments[idIndex];
+    const next = segments[idIndex + 1];
+    const hash = parsed.searchParams.get('h') || (next && /^[0-9a-f]{8,}$/i.test(next) ? next : null);
+
+    return { id, hash, url: `https://vimeo.com/${id}${hash ? `/${hash}` : ''}` };
+  }
+
   static isYouTube(url) {
-    return url.includes('youtube.com/watch') || 
-           url.includes('youtu.be') || 
-           url.includes('youtube.com/shorts');
+    return this.extractYouTubeId(url) !== null;
   }
   
   static isVimeo(url) {
-    return url.includes('vimeo.com');
+    return this.parseVimeo(url) !== null;
   }
 
   static getThumbnail(url) {
-    if (this.isYouTube(url)) {
-      const match = url.match(/(?:v=|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{11})/);
-      if (match) {
-        const id = match[1];
-        return `https://img.youtube.com/vi/${id}/maxresdefault.jpg`;
-      }
-    }
-    return null;
+    const id = this.extractYouTubeId(url);
+    return id ? `https://img.youtube.com/vi/${id}/maxresdefault.jpg` : null;
   }
   
   static isHLS(url) {
-    return url.includes('.m3u8') || url.includes('m3u8');
+    return /\.m3u8(?:$|[?#/&])|[/=]m3u8(?:$|[/?#&])/i.test(url);
   }
   
   static isDASH(url) {
-    return url.includes('.mpd') || /\/manifest\(format=mpd/i.test(url);
+    return /\.mpd(?:$|[?#/&])|[/=]mpd(?:$|[/?#&])|\/manifest\(format=mpd/i.test(url);
   }
   
   static generateId() {
