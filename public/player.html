@@ -215,7 +215,35 @@
       flex-direction: column;
       gap: 0.45rem;
       flex-shrink: 0;
+      position: relative;
     }
+
+    #quality-menu {
+      position: absolute;
+      right: 0.85rem;
+      bottom: calc(100% + 0.4rem);
+      min-width: 112px;
+      max-height: 50vh;
+      overflow-y: auto;
+      padding: 0.25rem;
+      background: rgba(16, 16, 22, 0.96);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      box-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.7);
+      z-index: 6;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #quality-menu .q-item {
+      justify-content: flex-start;
+      width: 100%;
+      padding: 0.4rem 0.7rem;
+      font-size: 0.8rem;
+      white-space: nowrap;
+    }
+
+    #quality-menu .q-item.active { color: var(--accent); }
 
     #progress-wrap {
       position: relative;
@@ -635,6 +663,7 @@
   </div>
 
   <div id="controls">
+    <div id="quality-menu" role="menu" hidden></div>
     <div id="progress-wrap" role="slider" aria-label="Seek" tabindex="0">
       <div id="progress-fill"></div>
       <input type="range" id="seek-slider" min="0" max="100" value="0" step="0.01" aria-label="Seek">
@@ -649,6 +678,7 @@
       
       <div class="spacer"></div>
       
+      <button id="btn-quality" aria-label="Quality" hidden>Auto</button>
       <button id="btn-speed" aria-label="Playback speed">1x</button>
       <button id="btn-mute" aria-label="Mute"><i class="fa-solid fa-volume-high"></i></button>
       <input id="vol" type="range" min="0" max="1" step="0.02" value="1" aria-label="Volume">
@@ -700,6 +730,10 @@
     const loader = document.getElementById('loader');
     const btnPrev = document.getElementById('btn-prev');
     const btnNext = document.getElementById('btn-next');
+    const btnQuality = document.getElementById('btn-quality');
+    const qualityMenu = document.getElementById('quality-menu');
+    const controlsEl = document.getElementById('controls');
+    const wrapperEl = document.getElementById('wrapper');
 
     let hlsInstance = null;
     let dashInstance = null;
@@ -719,6 +753,9 @@
     let listenerAbort = null;
     let playlist = [];
     let playlistIndex = 0;
+    let quality = null;
+    let lastQualityPayload = '';
+    const QUALITY_KEY = 'quality';
 
     const HISTORY_KEY = 'history';
     const HISTORY_MAX_ENTRIES = 50;
@@ -867,7 +904,149 @@
       }, 500);
     }
 
+    function qualityLabel(level) {
+      return level.height ? `${level.height}p` : `${Math.round(level.bitrate / 1000)} kbps`;
+    }
+
+    function buildQualityEntries(rawLevels) {
+      const byLabel = new Map();
+      rawLevels.forEach((level, index) => {
+        const entry = { index, height: level.height || 0, bitrate: level.bitrate || 0 };
+        entry.label = qualityLabel(entry);
+        const existing = byLabel.get(entry.label);
+        if (!existing || entry.bitrate > existing.bitrate) byLabel.set(entry.label, entry);
+      });
+      return [...byLabel.values()].sort((a, b) => (b.height - a.height) || (b.bitrate - a.bitrate));
+    }
+
+    function closeQualityMenu() {
+      qualityMenu.hidden = true;
+    }
+
+    function clearQuality() {
+      quality = null;
+      lastQualityPayload = '';
+      btnQuality.hidden = true;
+      closeQualityMenu();
+      qualityMenu.innerHTML = '';
+    }
+
+    function pickEntryForHeight(height) {
+      if (!quality) return null;
+      const target = Number(height);
+      return quality.entries.find((entry) => entry.height <= target) || quality.entries[quality.entries.length - 1];
+    }
+
+    function emitQuality() {
+      if (!quality) return;
+      const auto = quality.selected === 'auto';
+      const selectedEntry = quality.entries.find((entry) => entry.index === quality.selected);
+      const height = auto ? quality.currentHeight : selectedEntry.height;
+      const payload = JSON.stringify({ auto, height });
+      if (payload === lastQualityPayload) return;
+      lastQualityPayload = payload;
+      sendEmbedEvent('qualitychange', { auto, height });
+    }
+
+    function renderQuality() {
+      if (!quality) return;
+      const auto = quality.selected === 'auto';
+      const selectedEntry = quality.entries.find((entry) => entry.index === quality.selected);
+      btnQuality.hidden = false;
+      btnQuality.textContent = auto ? 'Auto' : selectedEntry.label;
+
+      const items = [{ value: 'auto', text: auto && quality.currentLabel ? `Auto (${quality.currentLabel})` : 'Auto' }]
+        .concat(quality.entries.map((entry) => ({ value: entry.index, text: entry.label })));
+
+      qualityMenu.innerHTML = '';
+      items.forEach((item) => {
+        const option = document.createElement('button');
+        option.type = 'button';
+        option.className = item.value === quality.selected ? 'q-item active' : 'q-item';
+        option.textContent = item.text;
+        option.addEventListener('click', () => {
+          selectQuality(item.value, true);
+          closeQualityMenu();
+        });
+        qualityMenu.appendChild(option);
+      });
+    }
+
+    function selectQuality(value, persist) {
+      if (!quality) return;
+      quality.selected = value;
+      quality.apply(value === 'auto' ? -1 : value);
+      if (persist) {
+        const entry = quality.entries.find((item) => item.index === value);
+        Storage.set(QUALITY_KEY, value === 'auto' ? 'auto' : entry.height);
+      }
+      renderQuality();
+      emitQuality();
+    }
+
+    function updateCurrentQuality(rawIndex) {
+      if (!quality) return;
+      const label = quality.rawLabels[rawIndex];
+      if (!label || label === quality.currentLabel) return;
+      quality.currentLabel = label;
+      quality.currentHeight = quality.rawHeights[rawIndex];
+      renderQuality();
+      emitQuality();
+    }
+
+    function setupQuality(rawLevels, apply) {
+      const entries = buildQualityEntries(rawLevels);
+      if (entries.length < 2) {
+        clearQuality();
+        return;
+      }
+      quality = {
+        entries,
+        apply,
+        selected: 'auto',
+        currentLabel: null,
+        currentHeight: null,
+        rawLabels: rawLevels.map(qualityLabel),
+        rawHeights: rawLevels.map((level) => level.height || 0),
+      };
+      const saved = Storage.get(QUALITY_KEY, 'auto');
+      if (saved !== 'auto') {
+        const target = pickEntryForHeight(saved);
+        if (target) {
+          selectQuality(target.index, false);
+        }
+      }
+      renderQuality();
+      sendEmbedEvent('qualitylevels', { heights: entries.map((entry) => entry.height) });
+    }
+
+    function enterFullscreenLayout() {
+      stage.classList.add('fullscreen');
+      if (controlsEl.parentNode !== stage) stage.appendChild(controlsEl);
+    }
+
+    function exitFullscreenLayout() {
+      stage.classList.remove('fullscreen');
+      if (controlsEl.parentNode !== wrapperEl) wrapperEl.insertBefore(controlsEl, debugBar);
+      closeQualityMenu();
+      updateAspectRatio();
+    }
+
+    function toggleFullscreenMode() {
+      if (document.fullscreenElement) {
+        if (document.exitFullscreen) document.exitFullscreen();
+        return;
+      }
+      if (stage.classList.contains('fullscreen')) {
+        exitFullscreenLayout();
+        return;
+      }
+      enterFullscreenLayout();
+      if (stage.requestFullscreen) stage.requestFullscreen().catch(() => {});
+    }
+
     function destroyInstances() {
+      clearQuality();
       if (listenerAbort) { listenerAbort.abort(); listenerAbort = null; }
       if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
       if (dashInstance) { dashInstance.reset(); dashInstance = null; }
@@ -1158,6 +1337,10 @@
             hls.loadSource(srcUrl);
             hls.attachMedia(video);
             hls.on(Hls.Events.MANIFEST_PARSED, onMediaReady);
+            hls.on(Hls.Events.MANIFEST_PARSED, () => {
+              setupQuality(hls.levels, (level) => { hls.currentLevel = level; });
+            });
+            hls.on(Hls.Events.LEVEL_SWITCHED, (_, data) => updateCurrentQuality(data.level));
             hls.on(Hls.Events.ERROR, (_, data) => {
               if (!data.fatal) return;
               if (data.type === Hls.ErrorTypes.NETWORK_ERROR && mediaReady && networkRetries < 3) {
@@ -1180,10 +1363,25 @@
         }
 
         function loadDash(srcUrl) {
-          dashInstance = dashjs.MediaPlayer().create();
-          dashInstance.initialize(video, srcUrl, true);
-          dashInstance.on('streamInitialized', onMediaReady);
-          dashInstance.on('streamError', () => handleFailure('DASH stream error'));
+          const dash = dashjs.MediaPlayer().create();
+          dashInstance = dash;
+          dash.initialize(video, srcUrl, autoplay);
+          dash.on('streamInitialized', onMediaReady);
+          dash.on('streamInitialized', () => {
+            const list = dash.getBitrateInfoListFor('video') || [];
+            setupQuality(list.map((item) => ({ height: item.height, bitrate: item.bitrate })), (level) => {
+              if (level === -1) {
+                dash.updateSettings({ streaming: { abr: { autoSwitchBitrate: { video: true } } } });
+              } else {
+                dash.updateSettings({ streaming: { abr: { autoSwitchBitrate: { video: false } } } });
+                dash.setQualityFor('video', level, true);
+              }
+            });
+          });
+          dash.on('qualityChangeRendered', (event) => {
+            if (event.mediaType === 'video') updateCurrentQuality(event.newQuality);
+          });
+          dash.on('streamError', () => handleFailure('DASH stream error'));
         }
 
         function handleFailure(msg) {
@@ -1485,16 +1683,7 @@
 
     btnSpeed.addEventListener('click', cycleSpeed);
 
-    btnFs.addEventListener('click', () => {
-      if (!document.fullscreenElement) {
-        stage.classList.add('fullscreen');
-        if (stage.requestFullscreen) {
-          stage.requestFullscreen().catch(() => {});
-        }
-      } else {
-        if (document.exitFullscreen) document.exitFullscreen();
-      }
-    });
+    btnFs.addEventListener('click', toggleFullscreenMode);
 
     if (btnDownload) {
       btnDownload.addEventListener('click', async () => {
@@ -1541,12 +1730,22 @@
     }
 
     document.addEventListener('fullscreenchange', () => {
-      if (!document.fullscreenElement) {
-        stage.classList.remove('fullscreen');
-        updateAspectRatio();
-      } else {
-        stage.classList.add('fullscreen');
-      }
+      if (!document.fullscreenElement) exitFullscreenLayout();
+      else enterFullscreenLayout();
+    });
+
+    btnQuality.addEventListener('click', () => {
+      qualityMenu.hidden = !qualityMenu.hidden;
+    });
+
+    document.addEventListener('click', (event) => {
+      if (qualityMenu.hidden) return;
+      if (qualityMenu.contains(event.target) || btnQuality.contains(event.target)) return;
+      closeQualityMenu();
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') closeQualityMenu();
     });
 
     document.addEventListener('visibilitychange', () => {
@@ -1652,12 +1851,15 @@
             setIcon(btnMute, video.muted ? 'volume-xmark' : 'volume-high');
           }
           break;
-        case 'toggleFullscreen':
-          if (!document.fullscreenElement) {
-            stage.classList.add('fullscreen');
-            if (stage.requestFullscreen) stage.requestFullscreen().catch(() => {});
-          } else {
-            if (document.exitFullscreen) document.exitFullscreen();
+        case 'toggleFullscreen': toggleFullscreenMode(); break;
+        case 'setQuality':
+          if (quality) {
+            if (data.height === 'auto') {
+              selectQuality('auto', false);
+            } else if (Number.isFinite(Number(data.height))) {
+              const entry = pickEntryForHeight(data.height);
+              if (entry) selectQuality(entry.index, false);
+            }
           }
           break;
         case 'load': if (data.source) loadSingle(data.source, false); break;

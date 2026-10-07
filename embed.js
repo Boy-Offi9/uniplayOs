@@ -16,6 +16,8 @@ class UniplayOSEmbed {
     this.onError = options.onError || null;
     this.onTimeUpdate = options.onTimeUpdate || null;
     this.onTrackChange = options.onTrackChange || null;
+    this.onQualityLevels = options.onQualityLevels || null;
+    this.onQualityChange = options.onQualityChange || null;
     
     this.iframe = null;
     this.messageHandler = null;
@@ -115,6 +117,12 @@ class UniplayOSEmbed {
           this.source = data.source;
           if (this.onTrackChange) this.onTrackChange(data);
           break;
+        case 'qualitylevels':
+          if (this.onQualityLevels) this.onQualityLevels(data);
+          break;
+        case 'qualitychange':
+          if (this.onQualityChange) this.onQualityChange(data);
+          break;
         case 'download':
           console.log('Download started:', data.url);
           break;
@@ -164,6 +172,10 @@ class UniplayOSEmbed {
 
   setPlaybackRate(rate) {
     this.postMessage('setPlaybackRate', { rate });
+  }
+
+  setQuality(height) {
+    this.postMessage('setQuality', { height });
   }
 
   setDebug(enabled) {
