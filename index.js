@@ -42,7 +42,7 @@ app.get('/proxy', async (req, res) => {
   }
 });
 
-app.get('*', (req, res) => {
+app.get('/*splat', (req, res) => {
   if (path.extname(req.path)) {
     return res.status(404).type('text/plain').send('Not found');
   }
