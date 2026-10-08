@@ -16,6 +16,7 @@ const MANIFEST_CACHE_TTL_MS = 4000;
 const MANIFEST_CACHE_MAX_ENTRIES = 200;
 const MAX_MANIFEST_BYTES = 5 * 1024 * 1024;
 const MAX_URL_LENGTH = 8192;
+const MAX_TOKEN_LENGTH = 4096;
 const MAX_REDIRECTS = 5;
 const SEGMENT_RETRY_COUNT = 1;
 const SEGMENT_RETRY_DELAY_MS = 300;
@@ -333,23 +334,127 @@ function rewriteHlsManifest(manifest, manifestUrl, proxyBase) {
     .join('\n');
 }
 
+const DASH_URL_ATTRIBUTES = {
+  SegmentTemplate: ['media', 'initialization', 'index', 'bitstreamSwitching'],
+  SegmentURL: ['media', 'index'],
+  Initialization: ['sourceURL'],
+  RepresentationIndex: ['sourceURL'],
+  BitstreamSwitching: ['sourceURL'],
+};
+
+function xmlUnescape(value) {
+  return value
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+}
+
+function xmlEscape(value) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function dashReferenceUrl(value, base, proxyBase) {
+  let absolute;
+  try {
+    absolute = new URL(value, base).href;
+  } catch {
+    return null;
+  }
+
+  if (!/^https?:/i.test(absolute)) return null;
+
+  const dollar = absolute.indexOf('$');
+  if (dollar === -1) return `${proxyBase}?url=${encodeURIComponent(absolute)}`;
+
+  const query = absolute.indexOf('?');
+  const searchEnd = query === -1 ? dollar : Math.min(dollar, query);
+  const slash = absolute.lastIndexOf('/', searchEnd - 1);
+  const prefix = absolute.slice(0, slash + 1);
+  const rest = absolute.slice(slash + 1);
+  const token = Buffer.from(prefix, 'utf8').toString('base64url');
+
+  return `${proxyBase}/t/${token}/${rest}`;
+}
+
 function rewriteDashManifest(manifest, manifestUrl, proxyBase) {
-  const toProxied = makeProxifier(manifestUrl, proxyBase);
+  const tokenizer = /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>|<(\/?)([A-Za-z_][\w:.-]*)([^<>]*?)(\/?)>/g;
+  const stack = [{ base: manifestUrl, baseSet: false }];
+  const edits = [];
+  let match;
 
-  let rewritten = manifest.replace(
-    /<BaseURL>([^<]+)<\/BaseURL>/g,
-    (_match, url) => `<BaseURL>${toProxied(url.trim())}</BaseURL>`
-  );
+  while ((match = tokenizer.exec(manifest)) !== null) {
+    const [, closing, rawName, attributes, selfClosing] = match;
+    if (rawName === undefined) continue;
 
-  rewritten = rewritten.replace(
-    /\b(media|initialization|sourceURL)="([^"]+)"/g,
-    (match, attr, url) => {
-      if (url.includes('$')) return match;
-      return `${attr}="${toProxied(url)}"`;
+    if (closing) {
+      if (stack.length > 1) stack.pop();
+      continue;
     }
-  );
 
-  return rewritten;
+    const name = rawName.split(':').pop();
+    const parent = stack[stack.length - 1];
+
+    if (name === 'BaseURL' || name === 'Location') {
+      if (!selfClosing) {
+        const textStart = tokenizer.lastIndex;
+        const textEnd = manifest.indexOf('<', textStart);
+        const text = textEnd === -1 ? '' : xmlUnescape(manifest.slice(textStart, textEnd).trim());
+        let resolved = null;
+        if (text) {
+          try {
+            resolved = new URL(text, parent.base).href;
+          } catch {
+            resolved = null;
+          }
+        }
+        if (resolved && /^https?:/i.test(resolved)) {
+          if (name === 'BaseURL' && !parent.baseSet) {
+            parent.base = resolved;
+            parent.baseSet = true;
+          }
+          edits.push({
+            start: textStart,
+            end: textEnd,
+            text: xmlEscape(`${proxyBase}?url=${encodeURIComponent(resolved)}`),
+          });
+        }
+        stack.push({ base: parent.base, baseSet: true });
+      }
+      continue;
+    }
+
+    const allowed = DASH_URL_ATTRIBUTES[name];
+    if (allowed && attributes) {
+      const rewritten = attributes.replace(
+        /(?<=\s)([A-Za-z_][\w:.-]*)=(?:"([^"]*)"|'([^']*)')/g,
+        (whole, attribute, doubleQuoted, singleQuoted) => {
+          if (!allowed.includes(attribute)) return whole;
+          const value = xmlUnescape(doubleQuoted !== undefined ? doubleQuoted : singleQuoted);
+          if (!value) return whole;
+          const proxied = dashReferenceUrl(value, parent.base, proxyBase);
+          return proxied === null ? whole : `${attribute}="${xmlEscape(proxied)}"`;
+        }
+      );
+      if (rewritten !== attributes) {
+        const start = match.index + 1 + closing.length + rawName.length;
+        edits.push({ start, end: start + attributes.length, text: rewritten });
+      }
+    }
+
+    if (!selfClosing) stack.push({ base: parent.base, baseSet: false });
+  }
+
+  let output = manifest;
+  for (const edit of edits.sort((a, b) => b.start - a.start)) {
+    output = output.slice(0, edit.start) + edit.text + output.slice(edit.end);
+  }
+  return output;
 }
 
 function getCachedManifest(key) {
@@ -395,9 +500,7 @@ function originOf(url) {
   }
 }
 
-export const proxyMedia = async (req, res) => {
-  const url = req.query.url;
-
+async function handleProxy(req, res, url) {
   if (typeof url !== 'string' || !url) {
     return res.status(400).json({ error: 'missing url' });
   }
@@ -514,4 +617,28 @@ export const proxyMedia = async (req, res) => {
     console.error('proxy error', error.message);
     return res.status(502).json({ error: 'upstream request failed' });
   }
+}
+
+export const proxyMedia = (req, res) => handleProxy(req, res, req.query.url);
+
+export const proxyTemplatedMedia = (req, res) => {
+  const marker = '/proxy/t/';
+  const raw = req.originalUrl || req.url || '';
+  const markerIndex = raw.indexOf(marker);
+  const afterMarker = markerIndex === -1 ? '' : raw.slice(markerIndex + marker.length);
+  const slash = afterMarker.indexOf('/');
+  const token = slash === -1 ? afterMarker : afterMarker.slice(0, slash);
+  const rest = slash === -1 ? '' : afterMarker.slice(slash + 1);
+
+  if (!token || token.length > MAX_TOKEN_LENGTH || !/^[A-Za-z0-9_-]+$/.test(token)) {
+    return res.status(400).json({ error: 'invalid template token' });
+  }
+
+  const prefix = Buffer.from(token, 'base64url').toString('utf8');
+
+  if (!/^https?:\/\/[^\s]+\/$/.test(prefix)) {
+    return res.status(400).json({ error: 'invalid template token' });
+  }
+
+  return handleProxy(req, res, prefix + rest);
 };
