@@ -218,7 +218,8 @@
       position: relative;
     }
 
-    #quality-menu {
+    #quality-menu,
+    #subs-menu {
       position: absolute;
       right: 0.85rem;
       bottom: calc(100% + 0.4rem);
@@ -235,7 +236,8 @@
       flex-direction: column;
     }
 
-    #quality-menu .q-item {
+    #quality-menu .q-item,
+    #subs-menu .q-item {
       justify-content: flex-start;
       width: 100%;
       padding: 0.4rem 0.7rem;
@@ -243,7 +245,9 @@
       white-space: nowrap;
     }
 
-    #quality-menu .q-item.active { color: var(--accent); }
+    #quality-menu .q-item.active,
+    #subs-menu .q-item.active,
+    #btn-subs.active { color: var(--accent); }
 
     #progress-wrap {
       position: relative;
@@ -664,6 +668,7 @@
 
   <div id="controls">
     <div id="quality-menu" role="menu" hidden></div>
+    <div id="subs-menu" role="menu" hidden></div>
     <div id="progress-wrap" role="slider" aria-label="Seek" tabindex="0">
       <div id="progress-fill"></div>
       <input type="range" id="seek-slider" min="0" max="100" value="0" step="0.01" aria-label="Seek">
@@ -678,6 +683,7 @@
       
       <div class="spacer"></div>
       
+      <button id="btn-subs" aria-label="Subtitles" hidden><i class="fa-solid fa-closed-captioning"></i></button>
       <button id="btn-quality" aria-label="Quality" hidden>Auto</button>
       <button id="btn-speed" aria-label="Playback speed">1x</button>
       <button id="btn-mute" aria-label="Mute"><i class="fa-solid fa-volume-high"></i></button>
@@ -732,6 +738,8 @@
     const btnNext = document.getElementById('btn-next');
     const btnQuality = document.getElementById('btn-quality');
     const qualityMenu = document.getElementById('quality-menu');
+    const btnSubs = document.getElementById('btn-subs');
+    const subsMenu = document.getElementById('subs-menu');
     const controlsEl = document.getElementById('controls');
     const wrapperEl = document.getElementById('wrapper');
 
@@ -756,6 +764,12 @@
     let quality = null;
     let lastQualityPayload = '';
     const QUALITY_KEY = 'quality';
+    const SUBTITLE_KEY = 'subtitle';
+    const subtitleState = { tracks: [], selected: 'off', autoApplied: false, loadId: 0 };
+    let lastSubtitleTracksPayload = '';
+    let lastSubtitleChangePayload = '';
+    let playlistSubtitles = [];
+    let pendingSubtitles = [];
 
     const HISTORY_KEY = 'history';
     const HISTORY_MAX_ENTRIES = 50;
@@ -919,15 +933,207 @@
       return [...byLabel.values()].sort((a, b) => (b.height - a.height) || (b.bitrate - a.bitrate));
     }
 
-    function closeQualityMenu() {
-      qualityMenu.hidden = true;
+    const popupMenus = [
+      { menu: qualityMenu, button: btnQuality },
+      { menu: subsMenu, button: btnSubs },
+    ];
+
+    function closeMenus() {
+      popupMenus.forEach((entry) => { entry.menu.hidden = true; });
+    }
+
+    function toggleMenu(entry) {
+      const opening = entry.menu.hidden;
+      closeMenus();
+      if (!opening) return;
+      const buttonBox = entry.button.getBoundingClientRect();
+      const controlsBox = controlsEl.getBoundingClientRect();
+      entry.menu.style.right = `${Math.max(0, controlsBox.right - buttonBox.right)}px`;
+      entry.menu.hidden = false;
+    }
+
+    function renderOptionMenu(menu, items, selected, onPick) {
+      menu.innerHTML = '';
+      items.forEach((item) => {
+        const option = document.createElement('button');
+        option.type = 'button';
+        option.className = item.value === selected ? 'q-item active' : 'q-item';
+        option.textContent = item.text;
+        option.addEventListener('click', () => onPick(item.value));
+        menu.appendChild(option);
+      });
+    }
+
+    function normalizeSubtitles(list) {
+      if (!Array.isArray(list)) return [];
+      return list
+        .map((item) => (typeof item === 'string' ? { src: item } : item))
+        .filter((item) => item && typeof (item.src || item.url) === 'string')
+        .map((item) => ({
+          src: (item.src || item.url).trim(),
+          lang: item.lang || item.srclang || '',
+          label: item.label || item.lang || item.srclang || 'Subtitles',
+          isDefault: item.default === true,
+        }))
+        .filter((item) => item.src);
+    }
+
+    function subtitleFetchUrl(src) {
+      try {
+        const parsed = new URL(src, location.href);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+        return parsed.origin === location.origin
+          ? parsed.href
+          : `/proxy?url=${encodeURIComponent(parsed.href)}`;
+      } catch {
+        return null;
+      }
+    }
+
+    function disposeExternalTracks(tracks) {
+      tracks.forEach((track) => {
+        if (track.kind !== 'ext' || !track.element) return;
+        const blobUrl = track.element.src;
+        track.element.remove();
+        if (blobUrl) URL.revokeObjectURL(blobUrl);
+      });
+    }
+
+    function applySubtitle(key) {
+      const target = subtitleState.tracks.find((track) => track.key === key);
+      if (hlsInstance) {
+        hlsInstance.subtitleDisplay = true;
+        hlsInstance.subtitleTrack = target && target.kind === 'hls' ? target.ref : -1;
+      }
+      if (dashInstance) {
+        const useDash = Boolean(target && target.kind === 'dash');
+        dashInstance.enableText(useDash);
+        if (useDash) dashInstance.setTextTrack(target.ref);
+      }
+      subtitleState.tracks.forEach((track) => {
+        if (track.kind === 'ext') track.element.track.mode = track === target ? 'showing' : 'disabled';
+      });
+    }
+
+    function emitSubtitleChange() {
+      const target = subtitleState.tracks.find((track) => track.key === subtitleState.selected);
+      const payload = JSON.stringify([target ? target.lang : null, target ? target.label : null]);
+      if (payload === lastSubtitleChangePayload) return;
+      lastSubtitleChangePayload = payload;
+      sendEmbedEvent('subtitlechange', { lang: target ? target.lang : null, label: target ? target.label : null });
+    }
+
+    function renderSubtitles() {
+      const hasTracks = subtitleState.tracks.length > 0;
+      btnSubs.hidden = !hasTracks;
+      btnSubs.classList.toggle('active', subtitleState.selected !== 'off');
+      if (!hasTracks) {
+        subsMenu.hidden = true;
+        subsMenu.innerHTML = '';
+        return;
+      }
+      const items = [{ value: 'off', text: 'Off' }]
+        .concat(subtitleState.tracks.map((track) => ({ value: track.key, text: track.label })));
+      renderOptionMenu(subsMenu, items, subtitleState.selected, (value) => {
+        selectSubtitle(value, true);
+        closeMenus();
+      });
+    }
+
+    function selectSubtitle(key, persist) {
+      const target = subtitleState.tracks.find((track) => track.key === key);
+      subtitleState.selected = target ? key : 'off';
+      subtitleState.autoApplied = true;
+      applySubtitle(subtitleState.selected);
+      if (persist) Storage.set(SUBTITLE_KEY, target ? target.pref : 'off');
+      renderSubtitles();
+      emitSubtitleChange();
+    }
+
+    function maybeAutoSelectSubtitle() {
+      if (subtitleState.autoApplied || subtitleState.selected !== 'off') return;
+      const saved = Storage.get(SUBTITLE_KEY, null);
+      let target = null;
+      if (saved && saved !== 'off') target = subtitleState.tracks.find((track) => track.pref === saved);
+      if (!target && saved === null) target = subtitleState.tracks.find((track) => track.isDefault);
+      if (target) selectSubtitle(target.key, false);
+    }
+
+    function setTracksOfKind(kind, list) {
+      const kept = subtitleState.tracks.filter((track) => track.kind !== kind);
+      const added = list.map((track, index) => ({
+        key: `${kind}:${index}`,
+        kind,
+        ref: track.ref,
+        element: track.element,
+        lang: track.lang || '',
+        label: track.label || track.lang || `Track ${index + 1}`,
+        pref: track.lang || track.label || `${kind}${index}`,
+        isDefault: Boolean(track.isDefault),
+      }));
+      subtitleState.tracks = kept.concat(added);
+      if (!subtitleState.tracks.some((track) => track.key === subtitleState.selected)) {
+        subtitleState.selected = 'off';
+      }
+      renderSubtitles();
+      const payload = JSON.stringify(subtitleState.tracks.map((track) => [track.lang, track.label]));
+      if (payload !== lastSubtitleTracksPayload) {
+        lastSubtitleTracksPayload = payload;
+        if (subtitleState.tracks.length) {
+          sendEmbedEvent('subtitletracks', {
+            tracks: subtitleState.tracks.map((track) => ({ lang: track.lang, label: track.label })),
+          });
+        }
+      }
+      maybeAutoSelectSubtitle();
+    }
+
+    function resetSubtitles() {
+      subtitleState.loadId += 1;
+      disposeExternalTracks(subtitleState.tracks);
+      subtitleState.tracks = [];
+      subtitleState.selected = 'off';
+      subtitleState.autoApplied = false;
+      lastSubtitleTracksPayload = '';
+      lastSubtitleChangePayload = '';
+      renderSubtitles();
+    }
+
+    async function loadExternalSubtitles(list) {
+      if (!list.length) return;
+      const loadId = subtitleState.loadId;
+      const loaded = [];
+      for (const item of list) {
+        const fetchUrl = subtitleFetchUrl(item.src);
+        if (!fetchUrl) continue;
+        try {
+          const response = await fetch(fetchUrl);
+          if (!response.ok) continue;
+          const text = await response.text();
+          if (loadId !== subtitleState.loadId) break;
+          const blobUrl = URL.createObjectURL(new Blob([Utils.toWebVtt(text)], { type: 'text/vtt' }));
+          const element = document.createElement('track');
+          element.kind = 'subtitles';
+          element.label = item.label;
+          element.srclang = item.lang;
+          element.src = blobUrl;
+          video.appendChild(element);
+          element.track.mode = 'disabled';
+          loaded.push({ element, label: item.label, lang: item.lang, isDefault: item.isDefault });
+        } catch (err) {}
+      }
+      if (loadId !== subtitleState.loadId) {
+        disposeExternalTracks(loaded.map((track) => ({ kind: 'ext', element: track.element })));
+        return;
+      }
+      if (loaded.length) setTracksOfKind('ext', loaded);
     }
 
     function clearQuality() {
       quality = null;
       lastQualityPayload = '';
       btnQuality.hidden = true;
-      closeQualityMenu();
+      closeMenus();
       qualityMenu.innerHTML = '';
     }
 
@@ -958,17 +1164,9 @@
       const items = [{ value: 'auto', text: auto && quality.currentLabel ? `Auto (${quality.currentLabel})` : 'Auto' }]
         .concat(quality.entries.map((entry) => ({ value: entry.index, text: entry.label })));
 
-      qualityMenu.innerHTML = '';
-      items.forEach((item) => {
-        const option = document.createElement('button');
-        option.type = 'button';
-        option.className = item.value === quality.selected ? 'q-item active' : 'q-item';
-        option.textContent = item.text;
-        option.addEventListener('click', () => {
-          selectQuality(item.value, true);
-          closeQualityMenu();
-        });
-        qualityMenu.appendChild(option);
+      renderOptionMenu(qualityMenu, items, quality.selected, (value) => {
+        selectQuality(value, true);
+        closeMenus();
       });
     }
 
@@ -1028,7 +1226,7 @@
     function exitFullscreenLayout() {
       stage.classList.remove('fullscreen');
       if (controlsEl.parentNode !== wrapperEl) wrapperEl.insertBefore(controlsEl, debugBar);
-      closeQualityMenu();
+      closeMenus();
       updateAspectRatio();
     }
 
@@ -1047,6 +1245,8 @@
 
     function destroyInstances() {
       clearQuality();
+      setTracksOfKind('hls', []);
+      setTracksOfKind('dash', []);
       if (listenerAbort) { listenerAbort.abort(); listenerAbort = null; }
       if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
       if (dashInstance) { dashInstance.reset(); dashInstance = null; }
@@ -1240,6 +1440,8 @@
       listenerAbort = new AbortController();
       mediaReady = false;
       isReadySent = false;
+      resetSubtitles();
+      loadExternalSubtitles(pendingSubtitles);
       showLoader(true);
       currentSourceUrl = null;
       lastHistorySaveAt = 0;
@@ -1341,6 +1543,13 @@
               setupQuality(hls.levels, (level) => { hls.currentLevel = level; });
             });
             hls.on(Hls.Events.LEVEL_SWITCHED, (_, data) => updateCurrentQuality(data.level));
+            hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, (_, data) => {
+              setTracksOfKind('hls', (data.subtitleTracks || []).map((track, index) => ({
+                ref: index,
+                label: track.name,
+                lang: track.lang,
+              })));
+            });
             hls.on(Hls.Events.ERROR, (_, data) => {
               if (!data.fatal) return;
               if (data.type === Hls.ErrorTypes.NETWORK_ERROR && mediaReady && networkRetries < 3) {
@@ -1365,6 +1574,7 @@
         function loadDash(srcUrl) {
           const dash = dashjs.MediaPlayer().create();
           dashInstance = dash;
+          dash.updateSettings({ streaming: { text: { defaultEnabled: false } } });
           dash.initialize(video, srcUrl, autoplay);
           dash.on('streamInitialized', onMediaReady);
           dash.on('streamInitialized', () => {
@@ -1378,6 +1588,16 @@
               }
             });
           });
+          const syncDashText = () => {
+            const tracks = dash.getTracksFor('text') || [];
+            setTracksOfKind('dash', tracks.map((track, index) => ({
+              ref: index,
+              label: track.labels && track.labels[0] ? track.labels[0].text : '',
+              lang: track.lang,
+            })));
+          };
+          dash.on('streamInitialized', syncDashText);
+          dash.on('allTextTracksAdded', syncDashText);
           dash.on('qualityChangeRendered', (event) => {
             if (event.mediaType === 'video') updateCurrentQuality(event.newQuality);
           });
@@ -1489,6 +1709,7 @@
 
     function playTrack(autoplay) {
       const source = playlist[playlistIndex];
+      pendingSubtitles = playlistSubtitles[playlistIndex] || [];
       urlInput.value = source;
       updatePlaylistUI();
       if (playlist.length > 1) {
@@ -1509,9 +1730,10 @@
       playTrack(true);
     }
 
-    function loadSingle(url, autoplay) {
+    function loadSingle(url, autoplay, subtitles) {
       if (!url) return;
       playlist = [url];
+      playlistSubtitles = [subtitles || []];
       playlistIndex = 0;
       playTrack(autoplay);
     }
@@ -1734,18 +1956,17 @@
       else enterFullscreenLayout();
     });
 
-    btnQuality.addEventListener('click', () => {
-      qualityMenu.hidden = !qualityMenu.hidden;
-    });
+    btnQuality.addEventListener('click', () => toggleMenu(popupMenus[0]));
+    btnSubs.addEventListener('click', () => toggleMenu(popupMenus[1]));
 
     document.addEventListener('click', (event) => {
-      if (qualityMenu.hidden) return;
-      if (qualityMenu.contains(event.target) || btnQuality.contains(event.target)) return;
-      closeQualityMenu();
+      if (popupMenus.every((entry) => entry.menu.hidden)) return;
+      if (popupMenus.some((entry) => entry.menu.contains(event.target) || entry.button.contains(event.target))) return;
+      closeMenus();
     });
 
     document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') closeQualityMenu();
+      if (event.key === 'Escape') closeMenus();
     });
 
     document.addEventListener('visibilitychange', () => {
@@ -1772,20 +1993,34 @@
     }
 
     const initialSources = [];
+    const initialSubtitles = [];
     try {
       const parsedSources = JSON.parse(params.get('sources') || '[]');
       if (Array.isArray(parsedSources)) {
         parsedSources.forEach((item) => {
           const value = typeof item === 'string' ? item : (item && (item.source || item.src || item.url));
-          if (typeof value === 'string' && value.trim()) initialSources.push(value.trim());
+          if (typeof value === 'string' && value.trim()) {
+            initialSources.push(value.trim());
+            initialSubtitles.push(item && typeof item === 'object' ? normalizeSubtitles(item.subtitles) : []);
+          }
         });
       }
     } catch (err) {}
-    if (sourceParam && !initialSources.includes(sourceParam)) initialSources.unshift(sourceParam);
+    if (sourceParam && !initialSources.includes(sourceParam)) {
+      initialSources.unshift(sourceParam);
+      initialSubtitles.unshift([]);
+    }
+
+    let globalSubtitles = [];
+    try {
+      globalSubtitles = normalizeSubtitles(JSON.parse(params.get('subtitles') || '[]'));
+    } catch (err) {}
 
     if (initialSources.length) {
       playlist = initialSources;
       playlistIndex = Math.max(0, initialSources.indexOf(sourceParam));
+      initialSubtitles[playlistIndex] = (initialSubtitles[playlistIndex] || []).concat(globalSubtitles);
+      playlistSubtitles = initialSubtitles;
       playTrack(autoplayParam);
     } else {
       setTimeout(() => {
@@ -1862,7 +2097,16 @@
             }
           }
           break;
-        case 'load': if (data.source) loadSingle(data.source, false); break;
+        case 'load': if (data.source) loadSingle(data.source, false, normalizeSubtitles(data.subtitles)); break;
+        case 'setSubtitle': {
+          if (data.lang === 'off') {
+            selectSubtitle('off', false);
+          } else if (typeof data.lang === 'string') {
+            const match = subtitleState.tracks.find((track) => track.lang === data.lang);
+            if (match) selectSubtitle(match.key, false);
+          }
+          break;
+        }
         case 'next': playNext(true); break;
         case 'previous': playPrevious(); break;
         case 'destroy':

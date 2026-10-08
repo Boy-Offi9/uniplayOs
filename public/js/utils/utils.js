@@ -80,6 +80,13 @@ class Utils {
     return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico', 'tiff'].includes(ext);
   }
   
+  static toWebVtt(text) {
+    const normalized = text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').trim();
+    if (/^WEBVTT/.test(normalized)) return `${normalized}\n`;
+    const body = normalized.replace(/^.*-->.*$/gm, (line) => line.replace(/,/g, '.'));
+    return `WEBVTT\n\n${body}\n`;
+  }
+
   static extractYouTubeId(url) {
     let parsed;
     try {
