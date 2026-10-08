@@ -633,20 +633,25 @@ console.<span class="tok-fn">log</span>(result.fallbackChain);   <span class="to
           </thead>
           <tbody>
             <tr><td><code>200 / 206</code></td><td>Media streamed through, range requests return partial content</td></tr>
-            <tr><td><code>400</code></td><td>Missing <code>url</code> query param</td></tr>
+            <tr><td><code>400</code></td><td>Missing, invalid or unsupported <code>url</code> (only <code>http</code>/<code>https</code>, no embedded credentials)</td></tr>
+            <tr><td><code>403</code></td><td>Target resolves to a private or loopback address, or the host isn't on the allowlist</td></tr>
+            <tr><td><code>414</code></td><td><code>url</code> longer than 8192 characters</td></tr>
+            <tr><td><code>429</code></td><td>Per-IP rate limit exceeded — check <code>Retry-After</code></td></tr>
             <tr><td><code>422</code></td><td>Upstream returned HTML instead of media — usually a dead or blocked link</td></tr>
             <tr><td><code>502</code></td><td>Upstream fetch failed</td></tr>
             <tr><td><code>504</code></td><td>Upstream took longer than 15 seconds</td></tr>
           </tbody>
         </table>
+        <h3 class="sub">Target validation</h3>
+        <p>Loopback, private, link-local, carrier-grade NAT and IPv6 unique-local ranges (including IPv4-mapped and NAT64 forms) are blocked. Every redirect hop is validated again, and the address check also runs at connect time, so a hostname that resolves differently between the check and the request is still rejected.</p>
         <div class="callout"><strong>Optional —</strong> set <code>CF_WORKER_URL</code> in <code>.env</code> to route proxy requests through a Cloudflare Worker first, for sources that block by IP range. See the <code>UniplayOsproxy</code> repo for the worker setup.</div>
 
         <h3 class="sub">HLS &amp; DASH manifest rewriting</h3>
-        <p>When the proxied URL is an HLS playlist (<code>.m3u8</code>) or a DASH manifest (<code>.mpd</code>), the proxy doesn't just stream it through — it rewrites every segment, sub-playlist, encryption key, and <code>BaseURL</code> reference inside it to route back through <code>/proxy</code> too. Without this, a manifest could load fine while its individual segments still hit the original (possibly blocked) host directly.</p>
+        <p>When the proxied URL is an HLS playlist (<code>.m3u8</code>) or a DASH manifest (<code>.mpd</code>), the proxy doesn't just stream it through — it rewrites every segment, sub-playlist, encryption key, alternate audio/subtitle track, I-frame playlist, low-latency part, and <code>BaseURL</code> reference inside it to route back through <code>/proxy</code> too. <code>data:</code> key URIs are left untouched. Without this, a manifest could load fine while its individual segments still hit the original (possibly blocked) host directly.</p>
         <div class="callout"><strong>Known limitation —</strong> DASH <code>SegmentTemplate</code> attributes using <code>$Number$</code>/<code>$Time$</code> placeholders are left untouched, since query-string proxying doesn't compose with path-relative template resolution. <code>BaseURL</code> and <code>SegmentList</code>-based DASH streams are fully covered; templated live DASH streams aren't yet.</div>
 
         <h3 class="sub">Caching &amp; retries</h3>
-        <p>Rewritten manifests are cached in memory for a few seconds per source URL, so repeated requests for the same live manifest don't refetch upstream every time. Check the <code>X-Proxy-Cache</code> response header (<code>HIT</code> or <code>MISS</code>) to see whether a given response came from cache. Failed upstream requests (network errors or a <code>5xx</code> response) are retried once before the proxy gives up.</p>
+        <p>Rewritten manifests are cached in memory for a few seconds per source URL, so repeated requests for the same live manifest don't refetch upstream every time. Check the <code>X-Proxy-Cache</code> response header (<code>HIT</code> or <code>MISS</code>) to see whether a given response came from cache. Failed upstream requests (network errors or a <code>5xx</code> response) are retried once before the proxy gives up. Non-<code>200</code> manifest responses are passed through uncached.</p>
       </section>
 
       <section class="doc-section" id="player">
@@ -660,10 +665,16 @@ console.<span class="tok-fn">log</span>(result.fallbackChain);   <span class="to
           <tbody>
             <tr><td><code>url</code></td><td><code>?url=https://…/video.mp4</code></td><td>Media source to load on page open</td></tr>
             <tr><td><code>source</code></td><td><code>?source=https://…</code></td><td>Alias used by the embed script</td></tr>
+            <tr><td><code>sources</code></td><td><code>?sources=["https://…/a.mp4","https://…/b.mp4"]</code></td><td>URL-encoded JSON playlist; items can be strings or objects with <code>src</code>, <code>source</code> or <code>url</code></td></tr>
             <tr><td><code>autoplay</code></td><td><code>?autoplay=true</code></td><td>Starts playback immediately, muted where browsers require it</td></tr>
+            <tr><td><code>downloads</code></td><td><code>?downloads=false</code></td><td>Hides the download button</td></tr>
             <tr><td><code>debug</code></td><td><code>?debug=true</code></td><td>Shows the status/debug bar under the controls</td></tr>
           </tbody>
         </table>
+        <h3 class="sub">Playlists</h3>
+        <p>With more than one entry in <code>sources</code> (plus <code>source</code>, which sets the starting item), the player shows previous/next buttons and moves to the next item when one ends. Each change fires a <code>trackchange</code> event to the embedding page.</p>
+        <h3 class="sub">Quality selector</h3>
+        <p>HLS and DASH streams with more than one quality get a quality button next to the speed control. <strong>Auto</strong> lets the player adapt and shows the current level; picking a resolution pins it. Manual choices are remembered and re-applied to the closest level at or below the saved height. Plain files, YouTube and Vimeo don't show the button.</p>
       </section>
 
       <section class="doc-section" id="embed-script">
@@ -672,7 +683,7 @@ console.<span class="tok-fn">log</span>(result.fallbackChain);   <span class="to
         <pre><button class="copy" data-copy="<div id=&quot;player&quot; style=&quot;width:800px;height:450px;&quot;></div>
 
 <script type=&quot;module&quot;>
-  import UniplayOS from &quot;https://www.uniplayos.web.id/embed.js&quot;;
+  import UniplayOS from &quot;https://www.uniplayos.web.id/embed.esm.js&quot;;
 
   const player = new UniplayOS({
     container: &quot;#player&quot;,
@@ -686,7 +697,7 @@ console.<span class="tok-fn">log</span>(result.fallbackChain);   <span class="to
 </script>"><i class="fa-regular fa-copy"></i></button><code>&lt;div id=<span class="tok-str">"player"</span> style=<span class="tok-str">"width:800px;height:450px;"</span>&gt;&lt;/div&gt;
 
 &lt;script type=<span class="tok-str">"module"</span>&gt;
-  <span class="tok-key">import</span> UniplayOS <span class="tok-key">from</span> <span class="tok-str">"https://www.uniplayos.web.id/embed.js"</span>;
+  <span class="tok-key">import</span> UniplayOS <span class="tok-key">from</span> <span class="tok-str">"https://www.uniplayos.web.id/embed.esm.js"</span>;
 
   <span class="tok-key">const</span> player = <span class="tok-key">new</span> <span class="tok-fn">UniplayOS</span>({
     container: <span class="tok-str">"#player"</span>,
@@ -710,10 +721,10 @@ console.<span class="tok-fn">log</span>(result.fallbackChain);   <span class="to
           <tbody>
             <tr><td><code>container</code></td><td><code>'#uniplayos'</code></td><td>CSS selector for the element the player mounts into</td></tr>
             <tr><td><code>source</code></td><td><code>null</code></td><td>Single media URL to load</td></tr>
-            <tr><td><code>sources</code></td><td><code>[]</code></td><td>Multiple sources, passed through as JSON</td></tr>
+            <tr><td><code>sources</code></td><td><code>[]</code></td><td>Playlist of URLs (or objects with <code>src</code>/<code>source</code>/<code>url</code>), passed through as JSON. <code>source</code> picks the starting item</td></tr>
             <tr><td><code>width</code> / <code>height</code></td><td><code>'100%'</code> / <code>'500px'</code></td><td>Applied to the container element</td></tr>
             <tr><td><code>autoplay</code></td><td><code>false</code></td><td>Starts playback on load</td></tr>
-            <tr><td><code>allowDownloads</code></td><td><code>true</code></td><td>Shows the download control in the player UI</td></tr>
+            <tr><td><code>allowDownloads</code></td><td><code>true</code></td><td>Shows the download control in the player UI; <code>false</code> hides it</td></tr>
             <tr><td><code>debug</code></td><td><code>false</code></td><td>Shows the resolver/status debug bar</td></tr>
           </tbody>
         </table>
@@ -732,7 +743,11 @@ console.<span class="tok-fn">log</span>(result.fallbackChain);   <span class="to
             <tr><td><code>onPlay</code></td><td>Playback starts</td></tr>
             <tr><td><code>onPause</code></td><td>Playback pauses</td></tr>
             <tr><td><code>onEnded</code></td><td>Playback reaches the end of the source</td></tr>
-            <tr><td><code>onError</code></td><td>The source fails to load or resolve</td></tr>
+            <tr><td><code>onError</code></td><td>Every playback strategy has failed, or the media errors after it was ready</td></tr>
+            <tr><td><code>onTimeUpdate</code></td><td>Playback position changes; receives the player's time payload</td></tr>
+            <tr><td><code>onTrackChange</code></td><td>The playlist moves to another item; receives <code>{ index, source, total }</code></td></tr>
+            <tr><td><code>onQualityLevels</code></td><td>An HLS/DASH stream's qualities are known; receives <code>{ heights }</code>, highest first</td></tr>
+            <tr><td><code>onQualityChange</code></td><td>The selected or live quality changes; receives <code>{ auto, height }</code></td></tr>
           </tbody>
         </table>
       </section>
@@ -748,6 +763,12 @@ player.setVolume(0.5);
 player.toggleMute();
 player.toggleFullscreen();
 player.load('https://example.com/next.mp4');
+player.next();
+player.previous();
+player.setQuality(720);
+player.setQuality('auto');
+player.setPlaybackRate(1.5);
+player.setDebug(true);
 player.destroy();"><i class="fa-regular fa-copy"></i></button><code>player.<span class="tok-fn">play</span>();
 player.<span class="tok-fn">pause</span>();
 player.<span class="tok-fn">togglePlay</span>();
@@ -756,6 +777,12 @@ player.<span class="tok-fn">setVolume</span>(<span class="tok-str">0.5</span>);
 player.<span class="tok-fn">toggleMute</span>();
 player.<span class="tok-fn">toggleFullscreen</span>();
 player.<span class="tok-fn">load</span>(<span class="tok-str">'https://example.com/next.mp4'</span>);
+player.<span class="tok-fn">next</span>();
+player.<span class="tok-fn">previous</span>();
+player.<span class="tok-fn">setQuality</span>(<span class="tok-str">720</span>);
+player.<span class="tok-fn">setQuality</span>(<span class="tok-str">'auto'</span>);
+player.<span class="tok-fn">setPlaybackRate</span>(<span class="tok-str">1.5</span>);
+player.<span class="tok-fn">setDebug</span>(<span class="tok-key">true</span>);
 player.<span class="tok-fn">destroy</span>();</code></pre>
       </section>
 
@@ -780,6 +807,9 @@ player.<span class="tok-fn">destroy</span>();</code></pre>
           <tbody>
             <tr><td><code>PORT</code></td><td>No</td><td>Server port, defaults to <code>3000</code></td></tr>
             <tr><td><code>CF_WORKER_URL</code></td><td>No</td><td>Cloudflare Worker URL for the optional egress-proxy bypass layer</td></tr>
+            <tr><td><code>PROXY_RATE_LIMIT_MAX</code></td><td>No</td><td>Max proxy requests per IP per window, defaults to <code>300</code></td></tr>
+            <tr><td><code>PROXY_RATE_LIMIT_WINDOW_MS</code></td><td>No</td><td>Rate limit window in milliseconds, defaults to <code>60000</code></td></tr>
+            <tr><td><code>PROXY_ALLOWED_HOSTS</code></td><td>No</td><td>Comma-separated host allowlist (e.g. <code>.example.com,cdn.example.org</code>); empty allows any public host</td></tr>
           </tbody>
         </table>
       </section>
