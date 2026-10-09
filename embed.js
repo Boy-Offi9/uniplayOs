@@ -54,6 +54,7 @@ class UniplayOSEmbed {
     this.iframe.style.borderRadius = '12px';
     this.iframe.allow = 'autoplay; fullscreen; encrypted-media';
     this.iframe.allowFullscreen = true;
+    this.iframe.addEventListener('load', () => this.postMessage('hello'));
     
     container.appendChild(this.iframe);
   }

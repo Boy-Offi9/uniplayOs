@@ -540,6 +540,58 @@
       display: none !important;
     }
 
+    :root[data-theme="light"] {
+      --bg: #eef0f4;
+      --surface: #ffffff;
+      --border: #d5d9e0;
+      --text: #15171c;
+      --muted: #5a6070;
+      --accent: #3d7a00;
+      --up-accent-2: #0c8f7b;
+      --up-accent-dim: rgba(61, 122, 0, 0.18);
+      --up-border-soft: rgba(15, 20, 35, 0.1);
+      --up-shadow-lg: 0 24px 70px rgba(20, 24, 40, 0.16);
+    }
+
+    :root[data-theme="light"] #controls {
+      background: linear-gradient(180deg, #ffffff, #f2f4f7);
+      border-top-color: var(--border);
+    }
+
+    :root[data-theme="light"] #quality-menu,
+    :root[data-theme="light"] #subs-menu {
+      background: rgba(255, 255, 255, 0.98);
+      box-shadow: 0 16px 40px -12px rgba(20, 24, 40, 0.25);
+    }
+
+    :root[data-theme="light"] #resume-toast {
+      background: rgba(255, 255, 255, 0.94);
+      box-shadow: 0 10px 30px -12px rgba(20, 24, 40, 0.25);
+    }
+
+    :root[data-theme="light"] #play-big {
+      color: #c8ff00;
+    }
+
+    :root[data-theme="light"] #stage.fullscreen {
+      --text: #e8e8e8;
+      --muted: #b4b8c2;
+      --accent: #c8ff00;
+      --border: #1f1f1f;
+      --up-accent-2: #33e6c9;
+    }
+
+    :root[data-theme="light"] #stage.fullscreen #controls {
+      background: linear-gradient(180deg, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.85));
+      border-top-color: rgba(255, 255, 255, 0.1);
+    }
+
+    :root[data-theme="light"] #stage.fullscreen #quality-menu,
+    :root[data-theme="light"] #stage.fullscreen #subs-menu {
+      background: rgba(16, 16, 22, 0.96);
+      box-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.7);
+    }
+
     @media (min-width: 1024px) {
       #wrapper {
         max-height: 900px;
@@ -583,7 +635,14 @@
     }
 
     @media (max-width: 600px) {
-      #ctrl-row { gap: 0.3rem; }
+      #ctrl-row,
+      #stage.fullscreen #ctrl-row {
+        flex-wrap: wrap;
+        height: auto;
+        min-height: var(--ctrl-h);
+        gap: 0.3rem;
+        row-gap: 0.15rem;
+      }
       #vol { width: 45px; }
       #time { font-size: 0.7rem; min-width: 75px; }
       #play-big { width: 56px; height: 56px; font-size: 1.4rem; }
@@ -864,8 +923,29 @@
       status.classList.toggle('visible', !!msg && isDebugMode);
     }
 
+    function detectParentOrigin() {
+      try {
+        if (location.ancestorOrigins && location.ancestorOrigins.length) {
+          const origin = location.ancestorOrigins[0];
+          if (/^https?:\/\//.test(origin)) return origin;
+        }
+      } catch (err) {}
+      try {
+        if (document.referrer) {
+          const origin = new URL(document.referrer).origin;
+          if (/^https?:\/\//.test(origin)) return origin;
+        }
+      } catch (err) {}
+      return null;
+    }
+
+    let parentOrigin = detectParentOrigin();
+
     function sendEmbedEvent(action, payload = {}) {
-      window.parent.postMessage({ type: 'uniplayos', action, ...payload }, '*');
+      if (window.parent === window) return;
+      try {
+        window.parent.postMessage({ type: 'uniplayos', action, ...payload }, parentOrigin || '*');
+      } catch (err) {}
     }
 
     function sendReadyIfNeeded() {
@@ -1980,6 +2060,12 @@
     btnNext.addEventListener('click', () => playNext(true));
 
     const params = new URLSearchParams(window.location.search);
+    const themeParam = params.get('theme');
+    const resolvedTheme = themeParam === 'auto'
+      ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+      : themeParam;
+    if (resolvedTheme === 'light') document.documentElement.dataset.theme = 'light';
+
     const sourceParam = params.get('source') || params.get('url');
     const autoplayParam = params.get('autoplay') === 'true';
     const debugParam = params.get('debug') === 'true';
@@ -2032,6 +2118,7 @@
 
     window.addEventListener('message', (event) => {
       if (event.source !== window.parent) return;
+      if (/^https?:\/\//.test(event.origin)) parentOrigin = event.origin;
       const data = event.data;
       if (!data || data.type !== 'uniplayos') return;
       switch (data.action) {
