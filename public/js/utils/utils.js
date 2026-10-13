@@ -40,8 +40,13 @@ class Utils {
   static getFileName(url) {
     try {
       const cleanUrl = url.split('?')[0].split('#')[0];
-      const parts = cleanUrl.split('/');
-      return parts.pop() || 'download';
+      const last = cleanUrl.split('/').pop();
+      if (!last) return 'download';
+      try {
+        return decodeURIComponent(last);
+      } catch {
+        return last;
+      }
     } catch {
       return 'download';
     }

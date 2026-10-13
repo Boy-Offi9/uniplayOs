@@ -4,62 +4,201 @@ class Downloader {
     this.onProgress = options.onProgress || null;
     this.onComplete = options.onComplete || null;
     this.onError = options.onError || null;
+    this.largeFileThreshold = options.largeFileThreshold || 256 * 1024 * 1024;
+    this.controller = null;
+  }
+
+  cancel() {
+    if (this.controller) this.controller.abort();
   }
 
   async download(url, filename) {
-    const name = filename || Utils.getFileName(url);
+    const name = this._sanitizeFileName(filename || Utils.getFileName(url));
 
     try {
       if (this._isBlobUrl(url)) {
         this._trigger(url, name);
-        if (this.onComplete) this.onComplete({ url, filename: name });
+        this._emit('onComplete', { url, filename: name, mode: 'native' });
         return;
       }
 
-      await this._fetchAndTrigger(url, name);
+      await this._fetchAndSave(url, name);
     } catch (err) {
-      if (this.onError) this.onError(err);
+      this._emit('onError', err);
       throw err;
     }
   }
 
-  async _fetchAndTrigger(url, filename) {
+  async _fetchAndSave(url, filename) {
     const proxied = this._needsProxy(url)
       ? `${this.proxyBase}?url=${encodeURIComponent(url)}`
       : url;
 
-    const response = await fetch(proxied);
+    this.controller = new AbortController();
+    const signal = this.controller.signal;
 
-    if (!response.ok) {
-      throw new Error(`Failed to fetch: ${response.status} ${response.statusText}`);
+    try {
+      let response;
+      try {
+        response = await fetch(proxied, { signal });
+      } catch (err) {
+        throw this._normalizeError(err);
+      }
+
+      if (!response.ok) {
+        throw await this._errorFromResponse(response);
+      }
+
+      const contentType = response.headers.get('content-type') || 'application/octet-stream';
+      const named = this._withExtension(filename, contentType);
+      const contentLength = response.headers.get('content-length');
+      const total = contentLength ? parseInt(contentLength, 10) : null;
+
+      if (total && total > this.largeFileThreshold) {
+        const handle = await this._pickSaveTarget(named);
+        if (handle) {
+          const size = await this._streamToDisk(response, handle, total, signal);
+          this._emit('onComplete', { url, filename: named, size, mode: 'disk' });
+          return;
+        }
+
+        this.controller.abort();
+        this._trigger(proxied, named);
+        this._emit('onComplete', { url, filename: named, size: total, mode: 'native' });
+        return;
+      }
+
+      const size = await this._saveInMemory(response, named, contentType, total, signal);
+      this._emit('onComplete', { url, filename: named, size, mode: 'memory' });
+    } finally {
+      this.controller = null;
     }
+  }
 
-    const contentLength = response.headers.get('content-length');
-    const total = contentLength ? parseInt(contentLength, 10) : null;
-
+  async _saveInMemory(response, filename, contentType, total, signal) {
     const reader = response.body.getReader();
     const chunks = [];
     let received = 0;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-      received += value.length;
-      if (this.onProgress && total) {
-        this.onProgress({ received, total, percent: Math.round((received / total) * 100) });
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        received += value.length;
+        this._progress(received, total);
       }
+    } catch (err) {
+      throw this._normalizeError(err, signal);
     }
 
-    const blob = new Blob(chunks, {
-      type: response.headers.get('content-type') || 'application/octet-stream'
-    });
-
-    const blobUrl = URL.createObjectURL(blob);
+    const blobUrl = URL.createObjectURL(new Blob(chunks, { type: contentType }));
     this._trigger(blobUrl, filename);
     setTimeout(() => URL.revokeObjectURL(blobUrl), 4000);
+    return received;
+  }
 
-    if (this.onComplete) this.onComplete({ url, filename, size: received });
+  async _pickSaveTarget(filename) {
+    if (typeof window === 'undefined' || typeof window.showSaveFilePicker !== 'function') return null;
+
+    try {
+      return await window.showSaveFilePicker({ suggestedName: filename });
+    } catch (err) {
+      if (err && err.name === 'AbortError') {
+        const cancelled = new Error('Download cancelled');
+        cancelled.name = 'AbortError';
+        throw cancelled;
+      }
+      return null;
+    }
+  }
+
+  async _streamToDisk(response, handle, total, signal) {
+    const writable = await handle.createWritable();
+    const reader = response.body.getReader();
+    let received = 0;
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        await writable.write(value);
+        received += value.length;
+        this._progress(received, total);
+      }
+      await writable.close();
+      return received;
+    } catch (err) {
+      try { await writable.abort(); } catch {}
+      throw this._normalizeError(err, signal);
+    }
+  }
+
+  async _errorFromResponse(response) {
+    let detail = '';
+    try {
+      if ((response.headers.get('content-type') || '').includes('application/json')) {
+        const body = await response.json();
+        detail = body && body.error ? String(body.error) : '';
+      }
+    } catch {}
+
+    return new Error(detail
+      ? `${detail} (${response.status})`
+      : `Failed to fetch: ${response.status} ${response.statusText}`.trim());
+  }
+
+  _normalizeError(err, signal) {
+    if ((signal && signal.aborted) || (err && err.name === 'AbortError')) {
+      const cancelled = new Error('Download cancelled');
+      cancelled.name = 'AbortError';
+      return cancelled;
+    }
+    return err;
+  }
+
+  _progress(received, total) {
+    if (this.onProgress && total) {
+      this.onProgress({ received, total, percent: Math.min(100, Math.round((received / total) * 100)) });
+    }
+  }
+
+  _emit(handler, payload) {
+    if (!this[handler]) return;
+    try {
+      this[handler](payload);
+    } catch (err) {
+      console.error(`${handler} handler failed`, err);
+    }
+  }
+
+  _sanitizeFileName(name) {
+    const cleaned = String(name || '').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').trim();
+    return cleaned && cleaned !== '.' && cleaned !== '..' ? cleaned : 'download';
+  }
+
+  _withExtension(filename, contentType) {
+    if (/\.[A-Za-z0-9]{1,5}$/.test(filename)) return filename;
+    const extensions = {
+      'video/mp4': 'mp4',
+      'video/webm': 'webm',
+      'video/ogg': 'ogv',
+      'video/quicktime': 'mov',
+      'video/x-matroska': 'mkv',
+      'audio/mpeg': 'mp3',
+      'audio/mp4': 'm4a',
+      'audio/aac': 'aac',
+      'audio/ogg': 'ogg',
+      'audio/wav': 'wav',
+      'audio/webm': 'weba',
+      'audio/flac': 'flac',
+      'image/jpeg': 'jpg',
+      'image/png': 'png',
+      'image/gif': 'gif',
+      'image/webp': 'webp',
+    };
+    const extension = extensions[contentType.split(';')[0].trim().toLowerCase()];
+    return extension ? `${filename}.${extension}` : filename;
   }
 
   _trigger(url, filename) {
@@ -79,7 +218,8 @@ class Downloader {
   _needsProxy(url) {
     try {
       const u = new URL(url);
-      return !u.hostname || (!u.hostname.includes('blob') && u.hostname !== 'localhost');
+      if (u.protocol === 'blob:' || u.protocol === 'data:') return false;
+      return u.hostname !== 'localhost';
     } catch {
       return true;
     }

@@ -1,6 +1,6 @@
 {
   "name": "uniplayOs",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Universal media player engine with proxy and resolver layer",
   "main": "index.js",
   "type": "module",

@@ -541,9 +541,14 @@ async function handleProxy(req, res, url) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
+  let clientClosed = false;
+
   res.on('close', () => {
     clearTimeout(timeout);
-    if (!res.writableFinished) controller.abort();
+    if (!res.writableFinished) {
+      clientClosed = true;
+      controller.abort();
+    }
   });
 
   try {
@@ -594,7 +599,7 @@ async function handleProxy(req, res, url) {
     res.status(response.statusCode);
 
     pipeline(response, res, (err) => {
-      if (err && err.code !== 'ERR_STREAM_PREMATURE_CLOSE' && !isAbortError(err)) {
+      if (!clientClosed && err && err.code !== 'ERR_STREAM_PREMATURE_CLOSE' && !isAbortError(err)) {
         console.error('stream error', err.message);
       }
     });

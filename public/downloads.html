@@ -401,7 +401,9 @@
   function saveRecent(entry) {
     const list = loadRecents().filter(r => r.url !== entry.url);
     list.unshift(entry);
-    localStorage.setItem(RECENTS_KEY, JSON.stringify(list.slice(0, 6)));
+    try {
+      localStorage.setItem(RECENTS_KEY, JSON.stringify(list.slice(0, 6)));
+    } catch {}
     renderRecents();
   }
 
@@ -416,15 +418,23 @@
     list.forEach(entry => {
       const row = document.createElement('div');
       row.className = 'up-card recent-item';
-      row.innerHTML = `
-        <i class="fa-solid ${entry.type === 'audio' ? 'fa-music' : 'fa-file-video'}"></i>
-        <span class="name">${entry.name}</span>
-        <button type="button" data-url="${encodeURIComponent(entry.url)}">Reuse</button>
-      `;
-      row.querySelector('button').addEventListener('click', () => {
-        urlInput.value = decodeURIComponent(entry.url);
+
+      const icon = document.createElement('i');
+      icon.className = `fa-solid ${entry.type === 'audio' ? 'fa-music' : 'fa-file-video'}`;
+
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = String(entry.name || '');
+
+      const reuse = document.createElement('button');
+      reuse.type = 'button';
+      reuse.textContent = 'Reuse';
+      reuse.addEventListener('click', () => {
+        urlInput.value = String(entry.url || '');
         form.requestSubmit();
       });
+
+      row.append(icon, name, reuse);
       recentList.appendChild(row);
     });
   }
@@ -438,7 +448,7 @@
     preview.innerHTML = '';
     preview.classList.remove('visible');
 
-    if (type === 'mp4' || type === 'hls' || type === 'dash') {
+    if (type === 'mp4') {
       const video = document.createElement('video');
       video.src = url;
       video.controls = true;
@@ -461,6 +471,12 @@
       preview.appendChild(audio);
       preview.classList.add('visible');
     }
+  }
+
+  function setDownloadEnabled(enabled) {
+    btnDownload.disabled = !enabled;
+    btnDownload.style.opacity = enabled ? '1' : '0.5';
+    btnDownload.style.cursor = enabled ? 'pointer' : 'not-allowed';
   }
 
   form.addEventListener('submit', (e) => {
@@ -489,6 +505,7 @@
     currentResult = result;
 
     const isEmbed = result.strategy === 'iframe';
+    const isAdaptive = result.type === 'hls' || result.type === 'dash';
     const playableUrl = result.proxyRequired ? resolver.getProxyUrl(raw) : raw;
     const name = Utils.getFileName(raw) || 'download';
 
@@ -501,66 +518,79 @@
 
     if (isEmbed) {
       preview.classList.remove('visible');
-      btnDownload.disabled = true;
-      btnDownload.style.opacity = '0.5';
-      btnDownload.style.cursor = 'not-allowed';
+      setDownloadEnabled(false);
       setStatus('This is an embedded platform (YouTube/Vimeo) — open it in the player instead of downloading.', '');
+    } else if (isAdaptive) {
+      preview.innerHTML = '';
+      preview.classList.remove('visible');
+      setDownloadEnabled(false);
+      setStatus('This is an adaptive stream (HLS/DASH) split into many segments, so it can\'t be saved as one file here — open it in the player instead.', '');
     } else {
       setPreview(playableUrl, result.type);
-      btnDownload.disabled = false;
-      btnDownload.style.opacity = '1';
-      btnDownload.style.cursor = 'pointer';
+      setDownloadEnabled(true);
     }
 
     info.classList.add('visible');
   });
 
+  let activeDownloader = null;
+
   btnDownload.addEventListener('click', async () => {
+    if (activeDownloader) {
+      activeDownloader.cancel();
+      return;
+    }
     if (!currentUrl || !currentResult || btnDownload.disabled) return;
 
-    const name = Utils.getFileName(currentUrl) || 'download';
     progressWrap.classList.add('visible');
-    setStatus('Starting download…', '');
-    btnDownload.disabled = true;
-    const originalHtml = btnDownload.innerHTML;
-    btnDownload.innerHTML = '<i class="fa-solid fa-spinner up-spin"></i> Downloading…';
-
-    let sawProgress = false;
+    progressFill.style.width = '0%';
+    progressPct.textContent = '0%';
     progressFill.classList.add('indeterminate');
+    setStatus('Starting download…', '');
+
+    const originalHtml = btnDownload.innerHTML;
+    btnDownload.innerHTML = '<i class="fa-solid fa-xmark"></i> Cancel';
 
     const downloader = new Downloader({
       proxyBase: '/proxy',
       onProgress: ({ percent }) => {
         if (typeof percent === 'number') {
-          sawProgress = true;
           progressFill.classList.remove('indeterminate');
           progressFill.style.width = percent + '%';
           progressPct.textContent = percent + '%';
+          setStatus('Downloading…', '');
         }
       },
-      onComplete: ({ size }) => {
+      onComplete: ({ size, mode, filename }) => {
         progressFill.classList.remove('indeterminate');
-        progressFill.style.width = '100%';
-        progressPct.textContent = '100%';
-        setStatus(size ? `Saved — ${Utils.formatFileSize(size)}` : 'Saved to your downloads', 'ok');
-        btnDownload.disabled = false;
-        btnDownload.innerHTML = originalHtml;
-        saveRecent({ url: currentUrl, name, type: currentResult.type });
+        if (mode === 'native') {
+          progressWrap.classList.remove('visible');
+          setStatus('Large file — handed to your browser. Check its downloads list for progress.', 'ok');
+        } else {
+          progressFill.style.width = '100%';
+          progressPct.textContent = '100%';
+          setStatus(size ? `Saved — ${Utils.formatFileSize(size)}` : 'Saved to your downloads', 'ok');
+        }
+        saveRecent({ url: currentUrl, name: filename, type: currentResult.type });
       },
       onError: (err) => {
         progressFill.classList.remove('indeterminate');
-        setStatus(`Download failed — ${err.message || 'try again'}`, 'error');
-        btnDownload.disabled = false;
-        btnDownload.innerHTML = originalHtml;
+        progressWrap.classList.remove('visible');
+        if (err && err.name === 'AbortError') {
+          setStatus('Download cancelled.', '');
+        } else {
+          setStatus(`Download failed — ${(err && err.message) || 'try again'}`, 'error');
+        }
       }
     });
 
+    activeDownloader = downloader;
+
     try {
-      await downloader.download(currentUrl, name);
+      await downloader.download(currentUrl);
     } catch (err) {
-      progressFill.classList.remove('indeterminate');
-      setStatus('Download failed — try again.', 'error');
-      btnDownload.disabled = false;
+    } finally {
+      activeDownloader = null;
       btnDownload.innerHTML = originalHtml;
     }
   });
