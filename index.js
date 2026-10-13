@@ -37,20 +37,27 @@ const guardProxy = (handler) => async (req, res) => {
     await handler(req, res);
   } catch (err) {
     console.error('Proxy error:', err.message);
-    if (res.headersSent) return res.destroy();
+
+    if (res.headersSent) {
+      return res.destroy();
+    }
+
     res.status(502).json({ error: 'Failed to fetch media' });
   }
 };
 
 app.options('/proxy', proxyPreflight);
-app.options('/proxy/t/*', proxyPreflight);
-app.get('/proxy', guardProxy(proxyMedia));
-app.get('/proxy/t/*', guardProxy(proxyTemplatedMedia));
+app.options('/proxy/t/*splat', proxyPreflight);
 
-app.get('*', (req, res) => {
+app.get('/proxy', guardProxy(proxyMedia));
+app.get('/proxy/t/*splat', guardProxy(proxyTemplatedMedia));
+
+// SPA fallback — matches / and all nested paths.
+app.get('/{*splat}', (req, res) => {
   if (path.extname(req.path)) {
     return res.status(404).type('text/plain').send('Not found');
   }
+
   res.sendFile(path.join(publicDir, 'index.html'));
 });
 
