@@ -83,7 +83,7 @@ All optional — copy `.env.example` to `.env` and adjust as needed:
 | Variable                     | Default | Description                                                                 |
 | ----------------------------- | ------- | ----------------------------------------------------------------------------- |
 | `CF_WORKER_URL`               | unset   | Route proxy requests through a Cloudflare Worker first (for IP-range blocks) |
-| `PROXY_RATE_LIMIT_MAX`        | `60`    | Max proxy requests per IP per window                                        |
+| `PROXY_RATE_LIMIT_MAX`        | `300`   | Max proxy requests per IP per window (HLS/DASH playback issues many requests) |
 | `PROXY_RATE_LIMIT_WINDOW_MS`  | `60000` | Rate limit window, in milliseconds                                          |
 | `PROXY_ALLOWED_HOSTS`         | unset   | Comma-separated host allowlist (e.g. `.example.com,cdn.example.org`). Leave empty to allow any public host |
 

@@ -299,11 +299,6 @@
 
     const embedFrame = document.getElementById('embed-frame');
 
-    function extractYtId(url) {
-      const match = url.match(/(?:v=|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{11})/);
-      return match ? match[1] : null;
-    }
-
     function showVideo() { video.style.display = 'block'; embedFrame.style.display = 'none'; }
     function showEmbed() { video.style.display = 'none';  embedFrame.style.display = 'block'; }
 
@@ -320,7 +315,12 @@
     function log(msg, level = 'info', tag = level.toUpperCase()) {
       const entry = document.createElement('div');
       entry.className = `log-entry ${level}`;
-      entry.innerHTML = `<span class="log-ts">${ts()}</span><span class="log-tag">[${tag}]</span><span class="log-msg">${msg}</span>`;
+      [['log-ts', ts()], ['log-tag', `[${tag}]`], ['log-msg', String(msg)]].forEach(([className, text]) => {
+        const part = document.createElement('span');
+        part.className = className;
+        part.textContent = text;
+        entry.appendChild(part);
+      });
       logEl.appendChild(entry);
       logEl.scrollTop = logEl.scrollHeight;
     }
@@ -385,20 +385,16 @@
       log(`loading ${result.type} — ${rawUrl}`);
 
       if (result.strategy === 'iframe') {
-        if (Utils.isYouTube(rawUrl)) {
-          const id = extractYtId(rawUrl);
-          if (id) { loadYouTube(id); log('YT player loading', 'info', 'YT'); return; }
-        }
-        if (Utils.isVimeo(rawUrl)) {
+        const youtubeId = Utils.extractYouTubeId(rawUrl);
+        if (youtubeId) { loadYouTube(youtubeId); log('YT player loading', 'info', 'YT'); return; }
+        const vimeo = Utils.parseVimeo(rawUrl);
+        if (vimeo) {
           showEmbed();
-          const match = rawUrl.match(/vimeo\.com\/(\d+)/);
-          embedFrame.src = match ? `https://player.vimeo.com/video/${match[1]}?autoplay=1` : rawUrl;
+          embedFrame.src = `https://player.vimeo.com/video/${vimeo.id}?autoplay=1${vimeo.hash ? `&h=${vimeo.hash}` : ''}`;
           log('embed loaded', 'ok', 'IFRAME');
           return;
         }
-        showEmbed();
-        embedFrame.src = rawUrl;
-        log('embed loaded', 'ok', 'IFRAME');
+        log('unsupported embed URL', 'error', 'IFRAME');
         return;
       }
 

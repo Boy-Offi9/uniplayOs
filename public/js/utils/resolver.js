@@ -46,7 +46,8 @@ class Resolver {
   requiresProxy(url) {
     try {
       const u = new URL(url);
-      return !u.hostname || (!u.hostname.includes('blob') && u.hostname !== 'localhost');
+      if (u.protocol === 'blob:' || u.protocol === 'data:') return false;
+      return u.hostname !== 'localhost';
     } catch {
       return true;
     }

@@ -14,8 +14,16 @@ class UniplayOSEmbed {
     this.onPause = options.onPause || null;
     this.onEnded = options.onEnded || null;
     this.onError = options.onError || null;
+    this.onTimeUpdate = options.onTimeUpdate || null;
+    this.onTrackChange = options.onTrackChange || null;
+    this.onQualityLevels = options.onQualityLevels || null;
+    this.onQualityChange = options.onQualityChange || null;
+    this.onSubtitleTracks = options.onSubtitleTracks || null;
+    this.onSubtitleChange = options.onSubtitleChange || null;
+    this.subtitles = options.subtitles || [];
     
     this.iframe = null;
+    this.messageHandler = null;
     this.isReady = false;
     
     this.init();
@@ -46,6 +54,7 @@ class UniplayOSEmbed {
     this.iframe.style.borderRadius = '12px';
     this.iframe.allow = 'autoplay; fullscreen; encrypted-media';
     this.iframe.allowFullscreen = true;
+    this.iframe.addEventListener('load', () => this.postMessage('hello'));
     
     container.appendChild(this.iframe);
   }
@@ -60,14 +69,16 @@ class UniplayOSEmbed {
     if (this.sources.length > 0) {
       params.set('sources', JSON.stringify(this.sources));
     }
+
+    if (this.subtitles.length > 0) {
+      params.set('subtitles', JSON.stringify(this.subtitles));
+    }
     
     if (this.theme) {
       params.set('theme', this.theme);
     }
     
-    if (this.allowDownloads) {
-      params.set('downloads', 'true');
-    }
+    params.set('downloads', this.allowDownloads ? 'true' : 'false');
     
     if (this.autoplay) {
       params.set('autoplay', 'true');
@@ -83,7 +94,7 @@ class UniplayOSEmbed {
   }
   
   setupMessageListener() {
-    window.addEventListener('message', (event) => {
+    this.messageHandler = (event) => {
       if (event.origin !== this.playerOrigin) return;
       if (event.source !== this.iframe?.contentWindow) return;
 
@@ -108,12 +119,31 @@ class UniplayOSEmbed {
           if (this.onError) this.onError(data);
           break;
         case 'timeupdate':
+          if (this.onTimeUpdate) this.onTimeUpdate(data);
+          break;
+        case 'trackchange':
+          this.source = data.source;
+          if (this.onTrackChange) this.onTrackChange(data);
+          break;
+        case 'qualitylevels':
+          if (this.onQualityLevels) this.onQualityLevels(data);
+          break;
+        case 'qualitychange':
+          if (this.onQualityChange) this.onQualityChange(data);
+          break;
+        case 'subtitletracks':
+          if (this.onSubtitleTracks) this.onSubtitleTracks(data);
+          break;
+        case 'subtitlechange':
+          if (this.onSubtitleChange) this.onSubtitleChange(data);
           break;
         case 'download':
           console.log('Download started:', data.url);
           break;
       }
-    });
+    };
+
+    window.addEventListener('message', this.messageHandler);
   }
   
   postMessage(action, data = {}) {
@@ -153,14 +183,42 @@ class UniplayOSEmbed {
   toggleFullscreen() {
     this.postMessage('toggleFullscreen');
   }
+
+  setPlaybackRate(rate) {
+    this.postMessage('setPlaybackRate', { rate });
+  }
+
+  setSubtitle(lang) {
+    this.postMessage('setSubtitle', { lang });
+  }
+
+  setQuality(height) {
+    this.postMessage('setQuality', { height });
+  }
+
+  setDebug(enabled) {
+    this.postMessage('setDebug', { enabled });
+  }
+
+  next() {
+    this.postMessage('next');
+  }
+
+  previous() {
+    this.postMessage('previous');
+  }
   
-  load(source) {
+  load(source, subtitles = []) {
     this.source = source;
-    this.postMessage('load', { source });
+    this.postMessage('load', { source, subtitles });
   }
   
   destroy() {
     this.postMessage('destroy');
+    if (this.messageHandler) {
+      window.removeEventListener('message', this.messageHandler);
+      this.messageHandler = null;
+    }
     const container = document.querySelector(this.container);
     if (container) {
       container.innerHTML = '';
