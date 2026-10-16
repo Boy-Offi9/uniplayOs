@@ -247,7 +247,8 @@
 
     #quality-menu .q-item.active,
     #subs-menu .q-item.active,
-    #btn-subs.active { color: var(--accent); }
+    #btn-subs.active,
+    #btn-pip.active { color: var(--accent); }
 
     #progress-wrap {
       position: relative;
@@ -749,6 +750,7 @@
       <button id="btn-mute" aria-label="Mute"><i class="fa-solid fa-volume-high"></i></button>
       <input id="vol" type="range" min="0" max="1" step="0.02" value="1" aria-label="Volume">
       <button id="btn-download" aria-label="Download"><i class="fa-solid fa-download"></i></button>
+      <button id="btn-pip" aria-label="Picture in picture" hidden><i class="fa-solid fa-window-restore"></i></button>
       <button id="btn-fs" aria-label="Fullscreen"><i class="fa-solid fa-expand"></i></button>
     </div>
   </div>
@@ -797,6 +799,7 @@
     const btnPrev = document.getElementById('btn-prev');
     const btnNext = document.getElementById('btn-next');
     const btnQuality = document.getElementById('btn-quality');
+    const btnPip = document.getElementById('btn-pip');
     const qualityMenu = document.getElementById('quality-menu');
     const btnSubs = document.getElementById('btn-subs');
     const subsMenu = document.getElementById('subs-menu');
@@ -1344,6 +1347,7 @@
       }
       embedFrame.innerHTML = '';
       playbackMode = 'native';
+      updatePipButton();
       knownDuration = 0;
     }
 
@@ -1552,12 +1556,15 @@
 
           if (Utils.isYouTube(rawUrl)) {
             playbackMode = 'youtube';
+            updatePipButton();
             loadYouTube(rawUrl, autoplay, resumeState);
           } else if (Utils.isVimeo(rawUrl)) {
             playbackMode = 'vimeo';
+            updatePipButton();
             loadVimeo(rawUrl, autoplay, resumeState);
           } else {
             playbackMode = 'iframe';
+            updatePipButton();
             embedFrame.innerHTML = '';
             const frame = document.createElement('iframe');
             frame.allowFullscreen = true;
@@ -2012,6 +2019,40 @@
 
     volSlider.addEventListener('change', () => volSlider.blur());
 
+    const pipSupported = Boolean(document.pictureInPictureEnabled) && typeof video.requestPictureInPicture === 'function';
+
+    function updatePipButton() {
+      btnPip.hidden = !(pipSupported && playbackMode === 'native');
+      if (playbackMode !== 'native' && pipSupported && document.pictureInPictureElement) {
+        document.exitPictureInPicture().catch(() => {});
+      }
+    }
+
+    async function togglePictureInPicture() {
+      if (!pipSupported || playbackMode !== 'native') {
+        showToast('Picture-in-picture isn\'t available here', 1200);
+        return;
+      }
+      try {
+        if (document.pictureInPictureElement) await document.exitPictureInPicture();
+        else await video.requestPictureInPicture();
+      } catch (err) {
+        showToast('Picture-in-picture failed', 1200);
+      }
+    }
+
+    btnPip.addEventListener('click', togglePictureInPicture);
+
+    video.addEventListener('enterpictureinpicture', () => {
+      btnPip.classList.add('active');
+      sendEmbedEvent('pictureinpicture', { active: true });
+    });
+
+    video.addEventListener('leavepictureinpicture', () => {
+      btnPip.classList.remove('active');
+      sendEmbedEvent('pictureinpicture', { active: false });
+    });
+
     let lastSubtitleKey = null;
 
     function toggleSubtitles() {
@@ -2075,6 +2116,8 @@
         toggleMuted();
       } else if (key === 'f' || key === 'F') {
         toggleFullscreenMode();
+      } else if (key === 'i' || key === 'I') {
+        togglePictureInPicture();
       } else if (key === 'c' || key === 'C') {
         toggleSubtitles();
       } else if (key === '<') {

@@ -701,6 +701,7 @@ console.<span class="tok-fn">log</span>(result.fallbackChain);   <span class="to
             <tr><td><code>↑</code> / <code>↓</code></td><td>Volume up or down by 5%</td></tr>
             <tr><td><code>M</code></td><td>Mute or unmute</td></tr>
             <tr><td><code>F</code></td><td>Toggle fullscreen</td></tr>
+            <tr><td><code>I</code></td><td>Toggle picture-in-picture</td></tr>
             <tr><td><code>C</code></td><td>Toggle subtitles (re-selects the last track used)</td></tr>
             <tr><td><code>&lt;</code> / <code>&gt;</code></td><td>Slower or faster playback</td></tr>
             <tr><td><code>0</code>–<code>9</code></td><td>Jump to 0%–90% of the video</td></tr>
@@ -720,6 +721,8 @@ console.<span class="tok-fn">log</span>(result.fallbackChain);   <span class="to
             <tr><td>Double-tap the middle</td><td>Toggle fullscreen</td></tr>
           </tbody>
         </table>
+        <h3 class="sub">Picture-in-picture</h3>
+        <p>When the browser supports it, native, HLS and DASH playback show a picture-in-picture button next to fullscreen. The player sends a <code>pictureinpicture</code> message with <code>{ active }</code> when it opens or closes. Embeds created with <code>embed.js</code> already allow it. If you write the iframe yourself, add <code>picture-in-picture</code> to its <code>allow</code> attribute. There's no embed method for it, because browsers only start picture-in-picture from a direct click inside the player.</p>
         <h3 class="sub">Media controls</h3>
         <p>For native, HLS and DASH playback the player registers with the browser's Media Session API, so lock-screen and notification controls, media keys and Bluetooth headsets can play, pause, seek and move between playlist items. The title comes from the file name and the artist from the source host.</p>
       </section>
