@@ -687,6 +687,41 @@ console.<span class="tok-fn">log</span>(result.fallbackChain);   <span class="to
         <p>The last language you pick is remembered, and so is turning subtitles off. A remembered language wins over a track marked <code>default</code>, and a remembered Off wins over both. YouTube and Vimeo sources have their own caption controls and don't show the CC button.</p>
         <h3 class="sub">Quality selector</h3>
         <p>HLS and DASH streams with more than one quality get a quality button next to the speed control. <strong>Auto</strong> lets the player adapt and shows the current level; picking a resolution pins it. Manual choices are remembered and re-applied to the closest level at or below the saved height. Plain files, YouTube and Vimeo don't show the button.</p>
+        <h3 class="sub">Keyboard shortcuts and gestures</h3>
+        <p>Shortcuts work whenever the player has focus and you aren't typing in a field. Combinations with Ctrl, Cmd or Alt are left to the browser, and YouTube and Vimeo sources are driven through their own players, so only native, HLS and DASH playback is guaranteed.</p>
+        <table>
+          <caption>Keyboard</caption>
+          <thead>
+            <tr><th>Key</th><th>Action</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>Space</code> / <code>K</code></td><td>Play or pause</td></tr>
+            <tr><td><code>←</code> / <code>→</code></td><td>Seek 5 seconds back or forward</td></tr>
+            <tr><td><code>J</code> / <code>L</code></td><td>Seek 10 seconds back or forward</td></tr>
+            <tr><td><code>↑</code> / <code>↓</code></td><td>Volume up or down by 5%</td></tr>
+            <tr><td><code>M</code></td><td>Mute or unmute</td></tr>
+            <tr><td><code>F</code></td><td>Toggle fullscreen</td></tr>
+            <tr><td><code>C</code></td><td>Toggle subtitles (re-selects the last track used)</td></tr>
+            <tr><td><code>&lt;</code> / <code>&gt;</code></td><td>Slower or faster playback</td></tr>
+            <tr><td><code>0</code>–<code>9</code></td><td>Jump to 0%–90% of the video</td></tr>
+            <tr><td><code>Home</code> / <code>End</code></td><td>Jump to the start or the end</td></tr>
+            <tr><td><code>N</code> / <code>P</code></td><td>Next or previous playlist item</td></tr>
+          </tbody>
+        </table>
+        <table>
+          <caption>Mouse and touch</caption>
+          <thead>
+            <tr><th>Gesture</th><th>Action</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Tap the video</td><td>Play or pause</td></tr>
+            <tr><td>Double-tap the left third</td><td>Rewind 10 seconds</td></tr>
+            <tr><td>Double-tap the right third</td><td>Skip forward 10 seconds</td></tr>
+            <tr><td>Double-tap the middle</td><td>Toggle fullscreen</td></tr>
+          </tbody>
+        </table>
+        <h3 class="sub">Media controls</h3>
+        <p>For native, HLS and DASH playback the player registers with the browser's Media Session API, so lock-screen and notification controls, media keys and Bluetooth headsets can play, pause, seek and move between playlist items. The title comes from the file name and the artist from the source host.</p>
       </section>
 
       <section class="doc-section" id="embed-script">
