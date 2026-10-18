@@ -771,6 +771,7 @@
 <script src="/js/utils/api.js"></script>
 <script src="/js/utils/storage.js"></script>
 <script src="/js/utils/download.js"></script>
+<script src="/js/utils/stream-download.js"></script>
 
 <script>
   (function() {
@@ -2249,25 +2250,31 @@
         if (icon) icon.className = 'fa-solid fa-spinner up-spin';
         showToast('Starting download…', 0);
 
-        const downloader = new Downloader({
+        const isStream = StreamDownloader.isStreamUrl(currentSourceUrl);
+        const pickedQuality = quality && quality.selected !== 'auto'
+          ? quality.entries.find((entry) => entry.index === quality.selected)
+          : null;
+
+        const downloader = new (isStream ? StreamDownloader : Downloader)({
           proxyBase: '/proxy',
+          preferredHeight: pickedQuality ? pickedQuality.height : null,
           onProgress: ({ percent }) => {
             if (typeof percent === 'number') showToast(`Downloading… ${percent}%`, 0);
           },
-          onComplete: () => {
-            showToast('Saved to your downloads');
+          onComplete: ({ files }) => {
+            showToast(files && files.length > 1 ? 'Saved video and audio as two files' : 'Saved to your downloads');
             if (icon) icon.className = originalClass;
             btnDownload.disabled = false;
           },
-          onError: () => {
-            showToast('Download failed — try again');
+          onError: (err) => {
+            showToast(err && err.name === 'AbortError' ? 'Download cancelled' : `Download failed — ${(err && err.message) || 'try again'}`);
             if (icon) icon.className = originalClass;
             btnDownload.disabled = false;
           }
         });
 
         try {
-          await downloader.download(currentSourceUrl, Utils.getFileName(currentSourceUrl));
+          await downloader.download(currentSourceUrl, isStream ? undefined : Utils.getFileName(currentSourceUrl));
         } catch (err) {
           if (icon) icon.className = originalClass;
           btnDownload.disabled = false;
