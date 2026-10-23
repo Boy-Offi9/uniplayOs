@@ -52,7 +52,7 @@ class UniplayOSEmbed {
     this.iframe.style.border = 'none';
     this.iframe.style.background = '#0a0a12';
     this.iframe.style.borderRadius = '12px';
-    this.iframe.allow = 'autoplay; fullscreen; encrypted-media';
+    this.iframe.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture';
     this.iframe.allowFullscreen = true;
     this.iframe.addEventListener('load', () => this.postMessage('hello'));
     

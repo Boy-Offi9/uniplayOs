@@ -366,6 +366,7 @@
 <script src="/js/utils/utils.js"></script>
 <script src="/js/utils/resolver.js"></script>
 <script src="/js/utils/download.js"></script>
+<script src="/js/utils/stream-download.js"></script>
 <script>
 (() => {
   const form = document.getElementById('dl-form');
@@ -523,8 +524,8 @@
     } else if (isAdaptive) {
       preview.innerHTML = '';
       preview.classList.remove('visible');
-      setDownloadEnabled(false);
-      setStatus('This is an adaptive stream (HLS/DASH) split into many segments, so it can\'t be saved as one file here — open it in the player instead.', '');
+      setDownloadEnabled(true);
+      setStatus('Adaptive stream (HLS/DASH) — its segments will be downloaded and joined into a file. Video and audio can come out as two files.', '');
     } else {
       setPreview(playableUrl, result.type);
       setDownloadEnabled(true);
@@ -551,17 +552,19 @@
     const originalHtml = btnDownload.innerHTML;
     btnDownload.innerHTML = '<i class="fa-solid fa-xmark"></i> Cancel';
 
-    const downloader = new Downloader({
+    const DownloaderClass = StreamDownloader.isStreamUrl(currentUrl) ? StreamDownloader : Downloader;
+
+    const downloader = new DownloaderClass({
       proxyBase: '/proxy',
-      onProgress: ({ percent }) => {
+      onProgress: ({ percent, segments, totalSegments }) => {
         if (typeof percent === 'number') {
           progressFill.classList.remove('indeterminate');
           progressFill.style.width = percent + '%';
           progressPct.textContent = percent + '%';
-          setStatus('Downloading…', '');
+          setStatus(totalSegments ? `Downloading… ${segments}/${totalSegments} segments` : 'Downloading…', '');
         }
       },
-      onComplete: ({ size, mode, filename }) => {
+      onComplete: ({ size, mode, filename, files, note }) => {
         progressFill.classList.remove('indeterminate');
         if (mode === 'native') {
           progressWrap.classList.remove('visible');
@@ -569,7 +572,9 @@
         } else {
           progressFill.style.width = '100%';
           progressPct.textContent = '100%';
-          setStatus(size ? `Saved — ${Utils.formatFileSize(size)}` : 'Saved to your downloads', 'ok');
+          const label = files && files.length > 1 ? `Saved ${files.length} files` : 'Saved';
+          const detail = size ? `${label} — ${Utils.formatFileSize(size)}` : `${label} to your downloads`;
+          setStatus(note ? `${detail}. ${note}` : detail, 'ok');
         }
         saveRecent({ url: currentUrl, name: filename, type: currentResult.type });
       },
