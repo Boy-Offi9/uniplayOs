@@ -175,7 +175,7 @@ Deploy steps and details live in the [UniplayOsproxy](https://github.com/unitede
 
     const player = new UniplayOS({
       container: "#player",
-      source: "https://eliteprotech-url.zone.id/1783881711744rbbva1.mp4",
+      source: "https://sam-cdn.zone.id/files/RZEppVjjPq.mp4",
       debug: true,
 
       onReady() {
