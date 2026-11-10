@@ -7,6 +7,19 @@ class StreamDownloader extends Downloader {
     this.maxRetries = options.maxRetries || 4;
     this.keyCache = new Map();
     this.state = null;
+    this.limiter = null;
+  }
+
+  // reqkit's rate limiter reads X-RateLimit-* / Retry-After from the proxy, so every
+  // segment worker slows down together *before* a 429 instead of each hitting one.
+  // reqkit is optional (window.reqkit); without it the 429 retry below still works.
+  static makeLimiter() {
+    try {
+      const kit = typeof window !== 'undefined' ? window.reqkit : null;
+      return kit && typeof kit.createRateLimiter === 'function' ? kit.createRateLimiter({}) : null;
+    } catch {
+      return null;
+    }
   }
 
   static isStreamUrl(url) {
@@ -36,6 +49,7 @@ class StreamDownloader extends Downloader {
 
     this.controller = new AbortController();
     this.keyCache = new Map();
+    this.limiter = StreamDownloader.makeLimiter();
     let sinks = [];
 
     try {
@@ -199,7 +213,9 @@ class StreamDownloader extends Downloader {
         const headers = {};
         if (item.range) headers.Range = `bytes=${item.range.start}-${item.range.end}`;
 
+        if (this.limiter) await this.limiter.acquire({ signal });
         const response = await fetch(item.url, { signal, headers });
+        if (this.limiter) this.limiter.update(response);
 
         // A long HLS/DASH download can legitimately hit the proxy's per-IP limit.
         // Waiting that out isn't a failed attempt, so it doesn't use up a retry.
