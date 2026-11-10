@@ -1,6 +1,25 @@
+(function () {
+'use strict';
+
+if (typeof window === 'undefined' || window.UniplayOS) return;
+
+// The player lives on the same origin that served this script, not on the page
+// that embeds it. Resolve that origin once, at load time (document.currentScript
+// is only available while a classic script is executing; embed.esm.js passes the
+// origin through window.__UNIPLAYOS_ORIGIN__ instead).
+const SCRIPT_ORIGIN = (() => {
+  try {
+    const script = document.currentScript;
+    if (script && script.src) return new URL(script.src).origin;
+  } catch (err) {}
+  return window.__UNIPLAYOS_ORIGIN__ || null;
+})();
+
 class UniplayOSEmbed {
   constructor(options = {}) {
     this.container = options.container || '#uniplayos';
+    // `|| this.baseUrl` keeps the old `UniplayOS.prototype.baseUrl = ...` workaround working
+    this.baseUrl = options.baseUrl || this.baseUrl || null;
     this.source = options.source || null;
     this.sources = options.sources || [];
     this.theme = options.theme || 'dark';
@@ -29,8 +48,17 @@ class UniplayOSEmbed {
     this.init();
   }
   
+  resolveContainer() {
+    if (this.container && this.container.nodeType === 1) return this.container;
+    try {
+      return document.querySelector(this.container);
+    } catch (err) {
+      return null;
+    }
+  }
+
   init() {
-    const container = document.querySelector(this.container);
+    const container = this.resolveContainer();
     if (!container) {
       console.error('UniplayOS: Container not found');
       return;
@@ -54,6 +82,7 @@ class UniplayOSEmbed {
     this.iframe.style.borderRadius = '12px';
     this.iframe.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture';
     this.iframe.allowFullscreen = true;
+    this.iframe.title = 'UniplayOS player';
     this.iframe.addEventListener('load', () => this.postMessage('hello'));
     
     container.appendChild(this.iframe);
@@ -88,7 +117,7 @@ class UniplayOSEmbed {
       params.set('debug', 'true');
     }
     
-    const baseUrl = this.baseUrl || window.location.origin;
+    const baseUrl = String(this.baseUrl || SCRIPT_ORIGIN || window.location.origin).replace(/\/+$/, '');
     this.playerOrigin = new URL(baseUrl).origin;
     return `${baseUrl}/player.html?${params.toString()}`;
   }
@@ -219,10 +248,12 @@ class UniplayOSEmbed {
       window.removeEventListener('message', this.messageHandler);
       this.messageHandler = null;
     }
-    const container = document.querySelector(this.container);
+    const container = this.resolveContainer();
     if (container) {
       container.innerHTML = '';
     }
+    this.iframe = null;
+    this.isReady = false;
   }
   
   static init(options) {
@@ -230,6 +261,6 @@ class UniplayOSEmbed {
   }
 }
 
-if (typeof window !== 'undefined') {
-  window.UniplayOS = UniplayOSEmbed;
-}
+window.UniplayOS = UniplayOSEmbed;
+
+})();

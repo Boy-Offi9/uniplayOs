@@ -785,7 +785,8 @@ console.<span class="tok-fn">log</span>(result.fallbackChain);   <span class="to
             <tr><th>Option</th><th>Default</th><th>Description</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>container</code></td><td><code>'#uniplayos'</code></td><td>CSS selector for the element the player mounts into</td></tr>
+            <tr><td><code>container</code></td><td><code>'#uniplayos'</code></td><td>CSS selector, or the element itself, that the player mounts into</td></tr>
+            <tr><td><code>baseUrl</code></td><td>origin of the embed script</td><td>Where <code>player.html</code> is served from. Defaults to the origin the embed script was loaded from, so it normally never needs setting; use it when you self-host and load the script from somewhere else</td></tr>
             <tr><td><code>source</code></td><td><code>null</code></td><td>Single media URL to load</td></tr>
             <tr><td><code>sources</code></td><td><code>[]</code></td><td>Playlist of URLs (or objects with <code>src</code>/<code>source</code>/<code>url</code>), passed through as JSON. <code>source</code> picks the starting item</td></tr>
             <tr><td><code>width</code> / <code>height</code></td><td><code>'100%'</code> / <code>'500px'</code></td><td>Applied to the container element</td></tr>
