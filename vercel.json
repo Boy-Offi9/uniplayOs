@@ -12,6 +12,19 @@
           "value": "GET, OPTIONS"
         }
       ]
+    },
+    {
+      "source": "/embed.esm.js",
+      "headers": [
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET, OPTIONS"
+        }
+      ]
     }
   ]
 }

@@ -13,6 +13,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.set('trust proxy', 1);
+app.disable('x-powered-by');
 
 app.use(cors());
 app.use(express.static(publicDir));
@@ -61,6 +62,15 @@ app.get('/{*splat}', (req, res) => {
   res.sendFile(path.join(publicDir, 'index.html'));
 });
 
-app.listen(PORT, () => {
-  console.log(`UniplayOS running on http://localhost:${PORT}`);
-});
+// Vercel runs the exported app as a function and must not bind a port itself.
+if (!process.env.VERCEL) {
+  const server = app.listen(PORT, () => {
+    console.log(`UniplayOS running on http://localhost:${PORT}`);
+  });
+
+  const shutdown = () => server.close(() => process.exit(0));
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
+}
+
+export default app;
