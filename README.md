@@ -8,7 +8,7 @@ Video, audio, HLS, DASH, and embeds — through one resolver and proxy layer.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-339933?logo=node.js&logoColor=white)](https://nodejs.org)
-[![Express](https://img.shields.io/badge/express-4.x-000000?logo=express&logoColor=white)](https://expressjs.com)
+[![Express](https://img.shields.io/badge/express-5.x-000000?logo=express&logoColor=white)](https://expressjs.com)
 [![hls.js](https://img.shields.io/badge/hls.js-1.5-e6491d)](https://github.com/video-dev/hls.js)
 [![dash.js](https://img.shields.io/badge/dash.js-4.7-2c3e50)](https://github.com/Dash-Industry-Forum/dash.js)
 ![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)
@@ -53,13 +53,16 @@ uniplayos/
     ├── docs.html
     ├── assets/
     │   └── logo-wordmark.svg
+    ├── css/
+    │   └── enhance.css
     └── js/
         └── utils/
             ├── utils.js
             ├── storage.js
             ├── api.js
             ├── resolver.js
-            └── download.js
+            ├── download.js
+            └── stream-download.js
 ```
 
 ## Requirements
@@ -129,8 +132,18 @@ Add `?debug=true` to show the URL input bar and status log inline.
 Drop this into any page to embed the player:
 
 ```html
+<div id="uniplayos"></div>
 <script src="http://localhost:3000/embed.js"></script>
+<script>
+  UniplayOS.init({ container: '#uniplayos', source: 'https://example.com/video.mp4' });
+</script>
 ```
+
+The player iframe is loaded from the same origin that served `embed.js`, so this works on any host page. Pass `baseUrl` only if `player.html` lives somewhere else.
+
+## Deploying to Vercel
+
+`index.js` exports the Express app, so Vercel runs it as a function. Keep in mind that every proxied byte flows through that function: Vercel limits function duration, and the in-memory rate limiter and manifest cache are per-instance. For heavy HLS/DASH traffic, a long-running Node host is the better fit.
 
 ## Proxy endpoint
 
@@ -170,8 +183,6 @@ Deploy steps and details live in the [UniplayOsproxy](https://github.com/unitede
 
   <script type="module">
     import UniplayOS from "https://www.uniplayos.web.id/embed.esm.js";
-
-    UniplayOS.prototype.baseUrl = "https://www.uniplayos.web.id";
 
     const player = new UniplayOS({
       container: "#player",
