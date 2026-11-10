@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/unitedevz/uniplayOs/security/advisories/new
+    about: Report security problems privately. Please don't open a public issue.
+  - name: Documentation
+    url: https://www.uniplayos.web.id/docs.html
+    about: Check the docs for player parameters, the embed API and proxy behavior.
