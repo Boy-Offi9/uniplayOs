@@ -22,24 +22,26 @@ Video, audio, HLS, DASH, and embeds — through one resolver and proxy layer.
 
 ## Features
 
-- 🎬 **Universal resolver** — detects mp4/webm, HLS (`.m3u8`), DASH (`.mpd`), YouTube, and Vimeo from a raw URL and picks the right playback strategy
-- 🔁 **Full manifest rewriting** — HLS and DASH segments, sub-playlists, and encryption keys are rewritten to route through the proxy, not just the top-level manifest
-- 🛡️ **SSRF-guarded proxy** — blocks requests to private/internal IPs and cloud metadata endpoints, with DNS-rebind protection, an optional host allowlist, and per-IP rate limiting
-- ⚡ **Manifest caching + auto-retry** — short-TTL in-memory cache for live manifests, one automatic retry on upstream 5xx/network errors
-- ▶️ **Real embed control** — YouTube and Vimeo playback is driven through their official SDKs (IFrame API / Player SDK), so play/pause/seek/volume/speed all actually work, not just a static iframe
-- ⏯️ **Continue watching** — resumes playback position per source URL via `localStorage`, with a subtle resume toast
-- 🐢 **Playback speed control** — cycle 0.5x–2x, works across native video, YouTube, and Vimeo
-- 📦 **Embeddable player** — drop `embed.js` into any page, zero build step
-- 🧪 **Built-in test console** — live resolver output, proxy ping, and an event log for debugging playback
+- 🎬 **Universal resolver**: detects mp4/webm, audio, HLS (`.m3u8`), DASH (`.mpd`), YouTube and Vimeo from a raw URL and picks the right playback strategy
+- 🔁 **Full manifest rewriting**: HLS and DASH segments, sub-playlists, init segments and encryption keys are rewritten to route through the proxy, including DASH `SegmentTemplate` streams with `$Number$` / `$Time$` placeholders
+- 🛡️ **SSRF-guarded proxy**: blocks private/internal IPs and cloud metadata endpoints, re-checks every redirect hop and the address at connect time (DNS-rebind safe), with an optional host allowlist and per-IP rate limiting
+- ⚡ **Manifest caching + auto-retry**: short-TTL in-memory cache for live manifests, one automatic retry on upstream 5xx/network errors
+- ▶️ **Real embed control**: YouTube and Vimeo are driven through their official SDKs, so play/pause/seek/volume/speed actually work, not just a static iframe
+- 🎚️ **Quality, subtitles and playlists**: HLS/DASH quality menu, subtitle tracks (from the stream or external `.srt`/`.vtt` files), multi-item playlists with next/previous
+- ⌨️ **Controls everywhere**: keyboard shortcuts, double-tap seek, picture-in-picture, playback speed, Media Session (lock-screen and headset keys)
+- ⏯️ **Continue watching**: resumes playback position per source URL via `localStorage`, with a subtle resume toast
+- ⬇️ **Downloads**: direct files and HLS/DASH streams (segments are fetched, decrypted if AES-128, and joined), saved straight to disk in Chromium browsers
+- 📦 **Embeddable player**: drop `embed.js` into any page, zero build step
+- 🧪 **Built-in test console**: live resolver output, proxy ping, and an event log for debugging playback
 
 ## Project Structure
 
 ```text
 uniplayos/
-├── index.js
-├── proxy.js
-├── embed.js
-├── embed.esm.js
+├── index.js              # Express server (exports the app for Vercel)
+├── proxy.js              # SSRF-guarded proxy, manifest rewriting, cache
+├── embed.js              # drop-in embed script
+├── embed.esm.js          # ES module wrapper around embed.js
 ├── package.json
 ├── .env.example
 ├── vercel.json
@@ -56,13 +58,16 @@ uniplayos/
     ├── css/
     │   └── enhance.css
     └── js/
-        └── utils/
-            ├── utils.js
-            ├── storage.js
-            ├── api.js
-            ├── resolver.js
-            ├── download.js
-            └── stream-download.js
+        ├── utils/
+        │   ├── utils.js
+        │   ├── storage.js
+        │   ├── api.js
+        │   ├── resolver.js
+        │   ├── download.js
+        │   └── stream-download.js
+        └── vendor/
+            ├── reqkit.mjs          # vendored reqkit browser bundle
+            └── reqkit-global.js    # exposes it as window.reqkit
 ```
 
 ## Requirements
@@ -74,27 +79,29 @@ uniplayos/
 
 ```bash
 npm install
-npm run dev
+npm run dev     # watch mode
+npm start       # plain start, e.g. for production
 ```
 
 Server runs on `http://localhost:3000` by default.
 
 ## Configuration
 
-All optional — copy `.env.example` to `.env` and adjust as needed:
+All optional. Copy `.env.example` to `.env` and adjust as needed:
 
-| Variable                     | Default | Description                                                                 |
-| ----------------------------- | ------- | ----------------------------------------------------------------------------- |
-| `CF_WORKER_URL`               | unset   | Route proxy requests through a Cloudflare Worker first (for IP-range blocks) |
-| `PROXY_RATE_LIMIT_MAX`        | `300`   | Max proxy requests per IP per window (HLS/DASH playback issues many requests) |
-| `PROXY_RATE_LIMIT_WINDOW_MS`  | `60000` | Rate limit window, in milliseconds                                          |
-| `PROXY_ALLOWED_HOSTS`         | unset   | Comma-separated host allowlist (e.g. `.example.com,cdn.example.org`). Leave empty to allow any public host |
+| Variable                     | Default | Description                                                                                                |
+| ---------------------------- | ------- | ---------------------------------------------------------------------------------------------------------- |
+| `PORT`                       | `3000`  | Port the server listens on                                                                                 |
+| `CF_WORKER_URL`              | unset   | Route proxy requests through a Cloudflare Worker first (for IP-range blocks)                               |
+| `PROXY_RATE_LIMIT_MAX`       | `300`   | Max proxy requests per IP per window (HLS/DASH playback issues many requests)                              |
+| `PROXY_RATE_LIMIT_WINDOW_MS` | `60000` | Rate limit window, in milliseconds                                                                         |
+| `PROXY_ALLOWED_HOSTS`        | unset   | Comma-separated host allowlist (e.g. `.example.com,cdn.example.org`). Leave empty to allow any public host |
 
 The SSRF guard (blocking private IPs, localhost, and cloud metadata endpoints) is always on and isn't configurable.
 
 ## Testing
 
-Go to `http://localhost:3000/test.html` — this is the dev testing page.
+Go to `http://localhost:3000/test.html`, the dev testing page.
 
 Paste any media URL into the input and hit Load. The panel shows:
 
@@ -103,29 +110,41 @@ Paste any media URL into the input and hit Load. The panel shows:
 - live playback state (buffering, stalled, errors, resolution, duration)
 - a timestamped log of every event
 
-**Proxy ping** — use the bottom input to test if a URL can be fetched through the proxy without loading it into the player.
+**Proxy ping**: use the bottom input to test whether a URL can be fetched through the proxy without loading it into the player. It only requests the first KB, so it's safe to point at large files.
 
 ### What works
 
-- Direct video files (mp4, webm, etc.)
-- HLS streams (.m3u8), including segment/key rewriting
-- DASH streams (.mpd), including `BaseURL`/`SegmentList` rewriting
+- Direct video and audio files (mp4, webm, mp3, ...)
+- HLS streams (`.m3u8`), including segment, key and init-segment rewriting
+- DASH streams (`.mpd`), including `BaseURL`, `SegmentList` and `SegmentTemplate` (`$Number$` / `$Time$`) rewriting
 - YouTube and Vimeo, with full playback control via their official SDKs
+- Downloading direct files and non-live, non-DRM HLS/DASH streams
 
 ### What doesn't
 
-- TikTok, Instagram, Facebook — their video URLs are signed and loaded dynamically, can't be extracted without a headless browser or yt-dlp or something similar
-- DASH `SegmentTemplate` streams using `$Number$`/`$Time$` placeholders — proxying these needs a path-based proxy scheme, not yet implemented
+- TikTok, Instagram, Facebook: their video URLs are signed and loaded dynamically, so they can't be extracted without a headless browser or yt-dlp or something similar
+- DRM-protected streams and live streams (playback of live HLS works, downloading them doesn't)
+- Downloading HLS encryption other than AES-128, and DASH streams with more than one period
 
 ## Player
 
-`http://localhost:3000/player.html` — the actual player. Accepts a `?url=` param so you can deep-link directly into it:
+`http://localhost:3000/player.html` is the actual player. Deep-link into it with query parameters:
 
 ```
-http://localhost:3000/player.html?url=https://example.com/video.mp4
+http://localhost:3000/player.html?url=https://example.com/video.mp4&autoplay=true
 ```
 
-Add `?debug=true` to show the URL input bar and status log inline.
+| Parameter     | Description                                                                                  |
+| ------------- | -------------------------------------------------------------------------------------------- |
+| `url` / `source` | Media URL to load                                                                         |
+| `sources`     | JSON array of URLs (or `{ source, subtitles }` objects) for a playlist                       |
+| `subtitles`   | JSON array of external subtitle files (`.srt` or `.vtt`) for the current source              |
+| `autoplay`    | `true` to start playing on load                                                              |
+| `theme`       | `dark` (default), `light` or `auto`                                                          |
+| `downloads`   | `false` hides the download button                                                            |
+| `debug`       | `true` shows the URL input bar and status log inline                                         |
+
+Keyboard shortcuts (space/`k` play, arrows/`j`/`l` seek, `m` mute, `f` fullscreen, `c` captions, `<` `>` speed, `n`/`p` next/previous, ...) are listed in the [docs](https://www.uniplayos.web.id/docs.html#player).
 
 ## Embed
 
@@ -139,7 +158,16 @@ Drop this into any page to embed the player:
 </script>
 ```
 
-The player iframe is loaded from the same origin that served `embed.js`, so this works on any host page. Pass `baseUrl` only if `player.html` lives somewhere else.
+Or as an ES module:
+
+```html
+<script type="module">
+  import UniplayOS from 'http://localhost:3000/embed.esm.js';
+  const player = new UniplayOS({ container: '#uniplayos', source: 'https://example.com/video.mp4' });
+</script>
+```
+
+The player iframe is loaded from the same origin that served the embed script, so this works on any host page. Pass `baseUrl` only if `player.html` lives somewhere else. Options, events (`onReady`, `onPlay`, `onError`, ...) and methods (`play()`, `seek()`, `setQuality()`, ...) are documented in the [docs](https://www.uniplayos.web.id/docs.html#embed-script).
 
 ## Deploying to Vercel
 
@@ -147,13 +175,30 @@ The player iframe is loaded from the same origin that served `embed.js`, so this
 
 ## Proxy endpoint
 
-`GET /proxy?url=<encoded-url>` — fetches and streams the target URL, with SSRF protection, rate limiting, HLS/DASH manifest rewriting, caching, and automatic retries.
+`GET /proxy?url=<encoded-url>` fetches and streams the target URL, with SSRF protection, rate limiting, HLS/DASH manifest rewriting, caching, and automatic retries. Range requests are forwarded, so seeking works.
+
+- Rate-limit state is sent back in `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset`; a `429` carries `Retry-After`. The stream downloader reads these and slows itself down before it gets rejected.
+- Manifest responses include `X-Proxy-Cache: HIT | MISS`.
+- Every proxied response is sent with `X-Content-Type-Options: nosniff` and `Content-Security-Policy: default-src 'none'; sandbox`, so a link to a hostile SVG or XML file can't run script on your origin.
+- Upstream HTML is refused with `422`; upstream requests time out after 15 seconds.
+- `GET /proxy/t/<token>/<rest>` serves DASH `SegmentTemplate` segments (see the docs).
 
 Full docs: **[uniplayos.web.id/docs.html](https://www.uniplayos.web.id/docs.html)**
 
+## Downloads
+
+`/downloads.html` and the player's download button save direct files, and HLS/DASH streams by fetching and joining the segments in the browser. Chromium browsers write straight to disk, other browsers assemble the file in memory (up to 2 GB). Streams with separate video and audio are saved as two files. Segment requests are paced with [reqkit](https://github.com/boy-offi9-inc/reqkit)'s rate limiter (vendored in `public/js/vendor/`); if it fails to load, downloads still work.
+
+## Security notes
+
+- The proxy only fetches `http`/`https`, rejects URLs with embedded credentials, and blocks private, loopback, link-local and metadata addresses, on every redirect hop and again at connect time.
+- Set `PROXY_ALLOWED_HOSTS` if you only need a known set of sources; it turns the proxy from "any public host" into an allowlist.
+- The proxy is open to anyone who can reach it. If you expose it publicly, keep the rate limit on and consider putting it behind your own auth or an allowlist.
+- The player only falls back to a plain iframe for `http`/`https` URLs. `javascript:` and `data:` URLs are never framed.
+
 ## Cloudflare Worker proxy (optional)
 
-Some target sites block requests based on IP range. To bypass that, requests can be routed through a Cloudflare Worker that acts as an egress proxy — separate repo, `UniplayOsproxy`.
+Some target sites block requests based on IP range. To bypass that, requests can be routed through a Cloudflare Worker that acts as an egress proxy, kept in a separate repo, `UniplayOsproxy`.
 
 Set `CF_WORKER_URL` in `.env` (see `.env.example`) once deployed:
 
@@ -161,7 +206,7 @@ Set `CF_WORKER_URL` in `.env` (see `.env.example`) once deployed:
 CF_WORKER_URL=https://uniplay-proxy.your-subdomain.workers.dev
 ```
 
-Without this variable set, the app proxies directly as normal — this is purely an optional egress layer.
+Without this variable set, the app proxies directly as normal. This is purely an optional egress layer.
 
 Deploy steps and details live in the [UniplayOsproxy](https://github.com/unitedevz/UniplayOsproxy) repo README.
 
@@ -186,7 +231,7 @@ Deploy steps and details live in the [UniplayOsproxy](https://github.com/unitede
 
     const player = new UniplayOS({
       container: "#player",
-      source: "https://sam-cdn.zone.id/files/RZEppVjjPq.mp4",
+      source: "https://example.com/video.mp4",
       debug: true,
 
       onReady() {
@@ -215,20 +260,11 @@ Deploy steps and details live in the [UniplayOsproxy](https://github.com/unitede
 
 ## Contributing
 
-PRs welcome. Fork the repo, branch off `main`, and open a pull request describing what changed and why.
+PRs welcome. Fork the repo, branch off `main`, and open a pull request describing what changed and why. The full guide is in [CONTRIBUTING.md](./CONTRIBUTING.md): dev setup, how to test a change by hand, code style and commit conventions.
 
-## Lostboy Contribution
+- **Found a bug or have an idea?** [Open an issue](https://github.com/unitedevz/uniplayOs/issues/new/choose); the forms ask for the details that make it quick to fix.
+- **Found a security problem?** Please don't file a public issue. Follow [SECURITY.md](./SECURITY.md) and report it privately.
 
-Redesign of `public/index.html` — landing page only, no logic touched.
-
-- Rebuilt the layout with staggered entrance animations (`rise`, `underline`, `pulse` keyframes) instead of a static page, kept the exact same color tokens (`--bg`, `--accent`, `--muted`, etc.) so it still matches the player
-- Swapped every icon for Font Awesome (`fa-play`, `fa-flask`, `fa-file-video`, `fa-tower-broadcast`, `fa-diagram-project`, `fa-code`) — no emoji anywhere
-- Added a live status badge with a pulsing dot, a two-button hero (Launch Player / Try the Resolver), and a four-item capability grid (MP4/WebM, HLS, DASH, Embeddable)
-- Full responsive pass: 4-column feature grid collapses to 2 columns under 768px, action buttons stack full-width under 420px
-- Respects `prefers-reduced-motion` — animations and transitions drop out entirely for users who ask for it
-- Added proper SEO/meta: `<meta name="description">`, `<meta name="keywords">`, canonical link, Open Graph and Twitter card tags, and a `SoftwareApplication` JSON-LD block so the page is actually indexable and shareable
-- Added a subtle SVG-based noise texture and radial accent glows in the background for depth, all done in pure CSS, no extra image assets
-- Footer now links out to the GitHub repo instead of dead-ending
 
 ## License
 
