@@ -72,6 +72,9 @@ class StreamDownloader extends Downloader {
       return results;
     } catch (err) {
       const normalized = this._normalizeError(err, this.controller && this.controller.signal);
+      // Stop the prefetched segment requests that are still running; otherwise they
+      // keep eating bandwidth (and proxy rate limit) after the download has failed.
+      if (this.controller) this.controller.abort();
       await Promise.all(sinks.map((sink) => sink.abort().catch(() => {})));
       this._emit('onError', normalized);
       throw normalized;
@@ -189,6 +192,7 @@ class StreamDownloader extends Downloader {
 
   async _fetchItem(item, signal) {
     let lastError;
+    let rateLimited = 0;
 
     for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
       try {
@@ -197,10 +201,14 @@ class StreamDownloader extends Downloader {
 
         const response = await fetch(item.url, { signal, headers });
 
-        if (response.status === 429 && attempt < this.maxRetries) {
-          const wait = Math.min(30, parseFloat(response.headers.get('retry-after')) || attempt * 2);
+        // A long HLS/DASH download can legitimately hit the proxy's per-IP limit.
+        // Waiting that out isn't a failed attempt, so it doesn't use up a retry.
+        if (response.status === 429 && rateLimited < 20) {
+          rateLimited += 1;
+          const wait = Math.min(30, parseFloat(response.headers.get('retry-after')) || Math.min(10, rateLimited * 2));
           await response.arrayBuffer().catch(() => {});
           await this._sleep(wait * 1000, signal);
+          attempt -= 1;
           continue;
         }
 
@@ -235,13 +243,19 @@ class StreamDownloader extends Downloader {
 
   _sleep(ms, signal) {
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(resolve, ms);
-      if (signal) {
-        signal.addEventListener('abort', () => {
-          clearTimeout(timer);
-          reject(this._normalizeError(null, signal));
-        }, { once: true });
+      if (signal && signal.aborted) {
+        reject(this._normalizeError(null, signal));
+        return;
       }
+      const onAbort = () => {
+        clearTimeout(timer);
+        reject(this._normalizeError(null, signal));
+      };
+      const timer = setTimeout(() => {
+        if (signal) signal.removeEventListener('abort', onAbort);
+        resolve();
+      }, ms);
+      if (signal) signal.addEventListener('abort', onAbort, { once: true });
     });
   }
 

@@ -15,7 +15,8 @@ class Utils {
   }
   
   static parseTime(timeString) {
-    const parts = timeString.split(':').map(Number);
+    const parts = String(timeString).split(':').map(Number);
+    if (parts.some((part) => !Number.isFinite(part))) return 0;
     if (parts.length === 2) {
       return parts[0] * 60 + parts[1];
     } else if (parts.length === 3) {
@@ -55,7 +56,7 @@ class Utils {
   static getDomain(url) {
     try {
       const urlObj = new URL(url);
-      return urlObj.hostname.replace('www.', '');
+      return urlObj.hostname.replace(/^www\./, '');
     } catch {
       return '';
     }
@@ -177,10 +178,10 @@ class Utils {
   }
   
   static formatFileSize(bytes) {
-    if (bytes === 0) return '0 B';
+    if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
     const k = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    const i = Math.min(sizes.length - 1, Math.max(0, Math.floor(Math.log(bytes) / Math.log(k))));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
   

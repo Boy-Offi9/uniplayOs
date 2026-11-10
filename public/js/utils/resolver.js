@@ -47,7 +47,8 @@ class Resolver {
     try {
       const u = new URL(url);
       if (u.protocol === 'blob:' || u.protocol === 'data:') return false;
-      return u.hostname !== 'localhost';
+      if (typeof location !== 'undefined' && u.origin === location.origin) return false;
+      return !['localhost', '127.0.0.1', '[::1]'].includes(u.hostname);
     } catch {
       return true;
     }

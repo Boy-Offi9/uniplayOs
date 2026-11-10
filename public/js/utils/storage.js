@@ -22,22 +22,31 @@ class Storage {
   }
 
   static remove(key) {
-    localStorage.removeItem(this.prefix + key);
+    try {
+      localStorage.removeItem(this.prefix + key);
+    } catch {}
   }
 
   static has(key) {
-    return localStorage.getItem(this.prefix + key) !== null;
+    try {
+      return localStorage.getItem(this.prefix + key) !== null;
+    } catch {
+      return false;
+    }
   }
 
   static clear() {
-    const keys = Object.keys(localStorage).filter(k => k.startsWith(this.prefix));
-    keys.forEach(k => localStorage.removeItem(k));
+    this.keys().forEach((k) => this.remove(k));
   }
 
   static keys() {
-    return Object.keys(localStorage)
-      .filter(k => k.startsWith(this.prefix))
-      .map(k => k.slice(this.prefix.length));
+    try {
+      return Object.keys(localStorage)
+        .filter(k => k.startsWith(this.prefix))
+        .map(k => k.slice(this.prefix.length));
+    } catch {
+      return [];
+    }
   }
 }
 
