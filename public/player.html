@@ -772,6 +772,7 @@
 <script src="/js/utils/storage.js"></script>
 <script src="/js/utils/download.js"></script>
 <script src="/js/utils/stream-download.js"></script>
+<script type="module" src="/js/vendor/reqkit-global.js"></script>
 
 <script>
   (function() {
@@ -1352,6 +1353,26 @@
       knownDuration = 0;
     }
 
+    function mountIframe(rawUrl) {
+      let parsed;
+      try {
+        parsed = new URL(rawUrl, location.href);
+      } catch (err) {
+        return false;
+      }
+      // A `javascript:` URL in an iframe runs with this page's origin, so only
+      // plain web URLs are ever framed.
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+
+      embedFrame.innerHTML = '';
+      const frame = document.createElement('iframe');
+      frame.allowFullscreen = true;
+      frame.setAttribute('allow', 'autoplay');
+      frame.src = parsed.href;
+      embedFrame.appendChild(frame);
+      return true;
+    }
+
     function showVideo() {
       video.style.display = 'block';
       embedFrame.style.display = 'none';
@@ -1405,9 +1426,24 @@
         return;
       }
 
+      // YT.Player *replaces* the node it is given with its iframe, and destroy() then
+      // removes that iframe, which would take #embed-frame out of the DOM for every
+      // later load. Hand it a disposable child instead.
+      const apiTimer = setTimeout(() => {
+        if (currentSourceUrl !== rawUrl || ytPlayer) return;
+        showLoader(false);
+        if (loadTimeout) clearTimeout(loadTimeout);
+        if (isDebugMode) setStatus('YouTube player failed to load');
+        sendEmbedEvent('error', { message: 'YouTube API unavailable' });
+      }, 10000);
+
       whenYouTubeApiReady().then(() => {
+        clearTimeout(apiTimer);
         if (currentSourceUrl !== rawUrl) return;
-        ytPlayer = new YT.Player(embedFrame, {
+        embedFrame.innerHTML = '';
+        const mount = document.createElement('div');
+        embedFrame.appendChild(mount);
+        ytPlayer = new YT.Player(mount, {
           videoId,
           width: '100%',
           height: '100%',
@@ -1566,12 +1602,13 @@
           } else {
             playbackMode = 'iframe';
             updatePipButton();
-            embedFrame.innerHTML = '';
-            const frame = document.createElement('iframe');
-            frame.allowFullscreen = true;
-            frame.setAttribute('allow', 'autoplay');
-            frame.src = rawUrl;
-            embedFrame.appendChild(frame);
+            if (!mountIframe(rawUrl)) {
+              showLoader(false);
+              if (loadTimeout) clearTimeout(loadTimeout);
+              if (isDebugMode) setStatus('Unsupported URL');
+              sendEmbedEvent('error', { message: 'Unsupported URL' });
+              return;
+            }
             if (isDebugMode) setStatus('');
             sendReadyIfNeeded();
             showLoader(false);
@@ -1691,7 +1728,21 @@
           dash.on('qualityChangeRendered', (event) => {
             if (event.mediaType === 'video') updateCurrentQuality(event.newQuality);
           });
-          dash.on('streamError', () => handleFailure('DASH stream error'));
+          // dash.js reports fatal problems as 'error' (manifest/network/MSE) and
+          // 'playbackError' (the <video> element). Before the stream is ready that
+          // means "try the next strategy"; afterwards the player may recover on its
+          // own, so only surface it to the host page.
+          dash.on('error', (event) => {
+            const detail = event && event.error;
+            if (!mediaReady) {
+              handleFailure('DASH stream error');
+            } else {
+              sendEmbedEvent('error', { message: (detail && detail.message) || 'DASH error' });
+            }
+          });
+          dash.on('playbackError', () => {
+            if (!mediaReady) handleFailure('DASH playback error');
+          });
         }
 
         function handleFailure(msg) {
@@ -1717,12 +1768,12 @@
             loadNative(resolver.getProxyUrl(rawUrl));
           } else if (nextStep === 'iframe') {
             showEmbed();
-            embedFrame.innerHTML = '';
-            const frame = document.createElement('iframe');
-            frame.allowFullscreen = true;
-            frame.setAttribute('allow', 'autoplay');
-            frame.src = rawUrl;
-            embedFrame.appendChild(frame);
+            playbackMode = 'iframe';
+            updatePipButton();
+            if (!mountIframe(rawUrl)) {
+              onError(msg);
+              return;
+            }
             showLoader(false);
             if (loadTimeout) clearTimeout(loadTimeout);
             if (isDebugMode) setStatus('');
@@ -1762,7 +1813,9 @@
     }
 
     function setPlaybackSpeed(speed) {
-      currentSpeed = speed;
+      const rate = Number(speed);
+      if (!Number.isFinite(rate) || rate <= 0) return;
+      currentSpeed = Math.min(4, Math.max(0.25, rate));
       updateSpeedLabel();
       applyCurrentSpeed();
     }
@@ -1897,6 +1950,13 @@
       showLoader(false);
       if (waitingTimeout) clearTimeout(waitingTimeout);
       if (isDebugMode) setStatus('');
+    });
+
+    video.addEventListener('seeked', () => {
+      if (video.readyState >= 3) {
+        showLoader(false);
+        if (waitingTimeout) clearTimeout(waitingTimeout);
+      }
     });
 
     video.addEventListener('timeupdate', () => {
@@ -2385,20 +2445,21 @@
           break;
         case 'togglePlay': togglePlay(); break;
         case 'seek':
-          if (data.time !== undefined) {
+          if (Number.isFinite(Number(data.time)) && Number(data.time) >= 0) {
+            const seekTarget = Number(data.time);
             if (playbackMode === 'youtube') {
-              if (ytPlayer) ytPlayer.seekTo(data.time, true);
+              if (ytPlayer) ytPlayer.seekTo(seekTarget, true);
             } else if (playbackMode === 'vimeo') {
-              if (vimeoPlayer) vimeoPlayer.setCurrentTime(data.time);
-            } else {
-              video.currentTime = data.time;
+              if (vimeoPlayer) vimeoPlayer.setCurrentTime(seekTarget);
+            } else if (playbackMode === 'native') {
+              video.currentTime = seekTarget;
               if (!video.paused) showLoader(true);
             }
           }
           break;
         case 'setVolume':
-          if (data.level !== undefined) {
-            const v = Math.max(0, Math.min(1, data.level));
+          if (Number.isFinite(Number(data.level))) {
+            const v = Math.max(0, Math.min(1, Number(data.level)));
             volSlider.value = v;
             if (playbackMode === 'youtube') { if (ytPlayer) ytPlayer.setVolume(v * 100); }
             else if (playbackMode === 'vimeo') { if (vimeoPlayer) vimeoPlayer.setVolume(v); }
@@ -2417,7 +2478,7 @@
             }
           }
           break;
-        case 'load': if (data.source) loadSingle(data.source, false, normalizeSubtitles(data.subtitles)); break;
+        case 'load': if (typeof data.source === 'string' && data.source.trim()) loadSingle(data.source, false, normalizeSubtitles(data.subtitles)); break;
         case 'setSubtitle': {
           if (data.lang === 'off') {
             selectSubtitle('off', false);
@@ -2433,7 +2494,6 @@
           persistProgress(true);
           destroyInstances();
           video.pause();
-          video.src = '';
           showLoader(false);
           if (loadTimeout) clearTimeout(loadTimeout);
           if (waitingTimeout) clearTimeout(waitingTimeout);
@@ -2442,7 +2502,7 @@
           setDebugMode(data.enabled === true);
           break;
         case 'setPlaybackRate':
-          if (data.rate !== undefined) setPlaybackSpeed(data.rate);
+          setPlaybackSpeed(data.rate);
           break;
         default: break;
       }

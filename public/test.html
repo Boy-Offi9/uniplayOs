@@ -242,7 +242,7 @@
 
     <div id="stage">
       <video id="video"></video>
-      <iframe id="embed-frame" style="width:100%;height:100%;border:none;display:none;" allowfullscreen allow="autoplay"></iframe>
+      <div id="embed-frame" style="width:100%;height:100%;display:none;"></div>
     </div>
 
     <div id="video-info">
@@ -329,16 +329,26 @@
       if (hlsInstance)  { hlsInstance.destroy();  hlsInstance  = null; }
       if (dashInstance) { dashInstance.reset();   dashInstance = null; }
       if (ytInterval)   { clearInterval(ytInterval); ytInterval = null; }
-      if (ytPlayer)     { ytPlayer.destroy();     ytPlayer = null; }
+      if (ytPlayer)     { try { ytPlayer.destroy(); } catch (err) {} ytPlayer = null; }
+      embedFrame.innerHTML = '';
     }
 
     function loadYouTube(videoId) {
+      if (!window.YT || !YT.Player) {
+        log('YouTube API is not loaded yet, try again in a moment', 'warn', 'YT');
+        return;
+      }
       showEmbed();
-      embedFrame.id = 'yt-frame';
 
-      if (ytPlayer) { ytPlayer.loadVideoById(videoId); return; }
+      // YT.Player replaces the node it is given and destroy() removes its iframe,
+      // so give it a disposable child and keep #embed-frame itself in the DOM.
+      const mount = document.createElement('div');
+      embedFrame.innerHTML = '';
+      embedFrame.appendChild(mount);
 
-      ytPlayer = new YT.Player('yt-frame', {
+      ytPlayer = new YT.Player(mount, {
+        width: '100%',
+        height: '100%',
         videoId,
         playerVars: { autoplay: 1, controls: 0, rel: 0, modestbranding: 1 },
         events: {
@@ -390,7 +400,13 @@
         const vimeo = Utils.parseVimeo(rawUrl);
         if (vimeo) {
           showEmbed();
-          embedFrame.src = `https://player.vimeo.com/video/${vimeo.id}?autoplay=1${vimeo.hash ? `&h=${vimeo.hash}` : ''}`;
+          const frame = document.createElement('iframe');
+          frame.style.cssText = 'width:100%;height:100%;border:none;';
+          frame.allowFullscreen = true;
+          frame.setAttribute('allow', 'autoplay');
+          frame.src = `https://player.vimeo.com/video/${vimeo.id}?autoplay=1${vimeo.hash ? `&h=${encodeURIComponent(vimeo.hash)}` : ''}`;
+          embedFrame.innerHTML = '';
+          embedFrame.appendChild(frame);
           log('embed loaded', 'ok', 'IFRAME');
           return;
         }
@@ -464,11 +480,24 @@
       if (!url) return;
       log(`pinging proxy for — ${url}`, 'info', 'PING');
       const start = Date.now();
-      await Api.get(url, {
-        onError: err => log(`proxy error — ${err.message}`, 'error', 'PING')
-      });
-      const ms = Date.now() - start;
-      log(`proxy responded in ${ms}ms`, 'ok', 'PING');
+      try {
+        // Only the first KB is requested so pinging a large video doesn't pull the whole file.
+        const response = await fetch(`/proxy?url=${encodeURIComponent(url)}`, { headers: { Range: 'bytes=0-1023' } });
+        const ms = Date.now() - start;
+        const type = response.headers.get('content-type') || 'unknown type';
+        const cache = response.headers.get('x-proxy-cache');
+
+        if (response.ok) {
+          if (response.body) response.body.cancel().catch(() => {});
+          log(`proxy responded ${response.status} in ${ms}ms — ${type}${cache ? ` (cache ${cache})` : ''}`, 'ok', 'PING');
+        } else {
+          let detail = '';
+          try { detail = (await response.json()).error || ''; } catch (err) {}
+          log(`proxy error — ${response.status}${detail ? ` ${detail}` : ''} (${ms}ms)`, 'error', 'PING');
+        }
+      } catch (err) {
+        log(`proxy error — ${err.message}`, 'error', 'PING');
+      }
     });
 
     log('test environment ready', 'ok', 'INIT');

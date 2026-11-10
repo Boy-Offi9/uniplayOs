@@ -479,7 +479,18 @@ function setCachedManifest(key, body, contentType) {
   });
 }
 
+// The proxy relays third-party bytes from our own origin. Without these headers a
+// crafted /proxy?url=... link to an SVG/XHTML/XML file would run script here.
+// `sandbox` gives any navigated-to document an opaque origin and no scripts, and
+// does not affect <video>/<audio>/fetch() consumers of the same response.
+function applySafetyHeaders(res) {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+}
+
 function applyHeaders(res, upstreamHeaders) {
+  applySafetyHeaders(res);
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
 
@@ -493,8 +504,7 @@ function applyHeaders(res, upstreamHeaders) {
 
 function originOf(url) {
   try {
-    const parsed = new URL(url);
-    return `${parsed.protocol}//${parsed.hostname}`;
+    return `${new URL(url).origin}/`;
   } catch {
     return '';
   }
@@ -532,6 +542,7 @@ async function handleProxy(req, res, url) {
 
   const cached = getCachedManifest(cacheKey);
   if (cached) {
+    applySafetyHeaders(res);
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Content-Type', cached.contentType);
     res.setHeader('X-Proxy-Cache', 'HIT');
@@ -588,6 +599,7 @@ async function handleProxy(req, res, url) {
 
       setCachedManifest(cacheKey, rewritten, outContentType);
 
+      applySafetyHeaders(res);
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Content-Type', outContentType);
       res.setHeader('X-Proxy-Cache', 'MISS');

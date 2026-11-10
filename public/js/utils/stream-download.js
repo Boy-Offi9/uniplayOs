@@ -7,6 +7,19 @@ class StreamDownloader extends Downloader {
     this.maxRetries = options.maxRetries || 4;
     this.keyCache = new Map();
     this.state = null;
+    this.limiter = null;
+  }
+
+  // reqkit's rate limiter reads X-RateLimit-* / Retry-After from the proxy, so every
+  // segment worker slows down together *before* a 429 instead of each hitting one.
+  // reqkit is optional (window.reqkit); without it the 429 retry below still works.
+  static makeLimiter() {
+    try {
+      const kit = typeof window !== 'undefined' ? window.reqkit : null;
+      return kit && typeof kit.createRateLimiter === 'function' ? kit.createRateLimiter({}) : null;
+    } catch {
+      return null;
+    }
   }
 
   static isStreamUrl(url) {
@@ -36,6 +49,7 @@ class StreamDownloader extends Downloader {
 
     this.controller = new AbortController();
     this.keyCache = new Map();
+    this.limiter = StreamDownloader.makeLimiter();
     let sinks = [];
 
     try {
@@ -72,6 +86,9 @@ class StreamDownloader extends Downloader {
       return results;
     } catch (err) {
       const normalized = this._normalizeError(err, this.controller && this.controller.signal);
+      // Stop the prefetched segment requests that are still running; otherwise they
+      // keep eating bandwidth (and proxy rate limit) after the download has failed.
+      if (this.controller) this.controller.abort();
       await Promise.all(sinks.map((sink) => sink.abort().catch(() => {})));
       this._emit('onError', normalized);
       throw normalized;
@@ -189,18 +206,25 @@ class StreamDownloader extends Downloader {
 
   async _fetchItem(item, signal) {
     let lastError;
+    let rateLimited = 0;
 
     for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
       try {
         const headers = {};
         if (item.range) headers.Range = `bytes=${item.range.start}-${item.range.end}`;
 
+        if (this.limiter) await this.limiter.acquire({ signal });
         const response = await fetch(item.url, { signal, headers });
+        if (this.limiter) this.limiter.update(response);
 
-        if (response.status === 429 && attempt < this.maxRetries) {
-          const wait = Math.min(30, parseFloat(response.headers.get('retry-after')) || attempt * 2);
+        // A long HLS/DASH download can legitimately hit the proxy's per-IP limit.
+        // Waiting that out isn't a failed attempt, so it doesn't use up a retry.
+        if (response.status === 429 && rateLimited < 20) {
+          rateLimited += 1;
+          const wait = Math.min(30, parseFloat(response.headers.get('retry-after')) || Math.min(10, rateLimited * 2));
           await response.arrayBuffer().catch(() => {});
           await this._sleep(wait * 1000, signal);
+          attempt -= 1;
           continue;
         }
 
@@ -235,13 +259,19 @@ class StreamDownloader extends Downloader {
 
   _sleep(ms, signal) {
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(resolve, ms);
-      if (signal) {
-        signal.addEventListener('abort', () => {
-          clearTimeout(timer);
-          reject(this._normalizeError(null, signal));
-        }, { once: true });
+      if (signal && signal.aborted) {
+        reject(this._normalizeError(null, signal));
+        return;
       }
+      const onAbort = () => {
+        clearTimeout(timer);
+        reject(this._normalizeError(null, signal));
+      };
+      const timer = setTimeout(() => {
+        if (signal) signal.removeEventListener('abort', onAbort);
+        resolve();
+      }, ms);
+      if (signal) signal.addEventListener('abort', onAbort, { once: true });
     });
   }
 

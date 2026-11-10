@@ -1,0 +1,85 @@
+name: Bug report
+description: Something doesn't play, download or embed the way it should
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. **Security problem?** Don't file it here, use the private reporting link on the issue chooser page.
+
+        **Don't paste private, signed or tokenized URLs.** Strip the query string or use a public sample stream.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where does it happen?
+      options:
+        - Player (player.html)
+        - Embed (embed.js / embed.esm.js)
+        - Test console (test.html)
+        - Downloads (downloads.html / download button)
+        - Proxy (/proxy)
+        - Docs site
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: source-type
+    attributes:
+      label: Source type
+      options:
+        - MP4 / WebM / other direct file
+        - Audio file
+        - HLS (.m3u8)
+        - DASH (.mpd)
+        - YouTube
+        - Vimeo
+        - Not applicable
+    validations:
+      required: true
+  - type: input
+    id: url
+    attributes:
+      label: Example URL
+      description: A public URL that reproduces it, if you can share one.
+      placeholder: https://example.com/video.m3u8
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Paste ...
+        3. Click ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console or test-console output
+      description: Browser dev-tools console errors, the log from `/test.html`, or the proxy's JSON error response.
+      render: shell
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and OS
+      placeholder: Chrome 130 on Android 14
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: UniplayOS version or commit
+      description: "`version` in package.json, or the commit hash. Say 'live demo' if you used uniplayos.web.id."
