@@ -4,11 +4,7 @@ import net from 'net';
 import http from 'http';
 import https from 'https';
 import zlib from 'zlib';
-
-function intFromEnv(name, fallback) {
-  const parsed = parseInt(process.env[name] || '', 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
+import { clientIp, createRateLimiter, intFromEnv } from './rate-limit.js';
 
 const TIMEOUT_MS = 15000;
 const CF_WORKER_URL = process.env.CF_WORKER_URL || null;
@@ -21,9 +17,10 @@ const MAX_REDIRECTS = 5;
 const SEGMENT_RETRY_COUNT = 1;
 const SEGMENT_RETRY_DELAY_MS = 300;
 
-const RATE_LIMIT_MAX = intFromEnv('PROXY_RATE_LIMIT_MAX', 300);
-const RATE_LIMIT_WINDOW_MS = intFromEnv('PROXY_RATE_LIMIT_WINDOW_MS', 60000);
-const RATE_LIMIT_MAX_TRACKED_IPS = 5000;
+const proxyLimiter = createRateLimiter({
+  max: intFromEnv('PROXY_RATE_LIMIT_MAX', 300),
+  windowMs: intFromEnv('PROXY_RATE_LIMIT_WINDOW_MS', 60000),
+});
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 const PASSTHROUGH_HEADERS = ['content-type', 'content-length', 'content-range', 'content-encoding'];
@@ -34,7 +31,6 @@ const ALLOWED_HOSTS = (process.env.PROXY_ALLOWED_HOSTS || '')
   .filter(Boolean);
 
 const manifestCache = new Map();
-const rateLimitMap = new Map();
 
 const blockedRanges = new net.BlockList();
 
@@ -74,31 +70,6 @@ function sleep(ms) {
 
 function httpError(statusCode, message) {
   return Object.assign(new Error(message), { statusCode });
-}
-
-function clientIp(req) {
-  return req.ip || req.connection?.remoteAddress || 'unknown';
-}
-
-function checkRateLimit(ip) {
-  const now = Date.now();
-  const entry = rateLimitMap.get(ip);
-
-  if (!entry || now >= entry.resetAt) {
-    if (rateLimitMap.size >= RATE_LIMIT_MAX_TRACKED_IPS) {
-      const oldestKey = rateLimitMap.keys().next().value;
-      rateLimitMap.delete(oldestKey);
-    }
-    rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
-    return { allowed: true, remaining: RATE_LIMIT_MAX - 1, resetAt: now + RATE_LIMIT_WINDOW_MS };
-  }
-
-  if (entry.count >= RATE_LIMIT_MAX) {
-    return { allowed: false, remaining: 0, resetAt: entry.resetAt };
-  }
-
-  entry.count += 1;
-  return { allowed: true, remaining: RATE_LIMIT_MAX - entry.count, resetAt: entry.resetAt };
 }
 
 function normalizeHostname(hostname) {
@@ -519,15 +490,10 @@ async function handleProxy(req, res, url) {
     return res.status(414).json({ error: 'url too long' });
   }
 
-  const ip = clientIp(req);
-  const rateLimit = checkRateLimit(ip);
-
-  res.setHeader('X-RateLimit-Limit', String(RATE_LIMIT_MAX));
-  res.setHeader('X-RateLimit-Remaining', String(Math.max(0, rateLimit.remaining)));
-  res.setHeader('X-RateLimit-Reset', String(Math.ceil(rateLimit.resetAt / 1000)));
+  const rateLimit = proxyLimiter.check(clientIp(req));
+  proxyLimiter.setHeaders(res, rateLimit);
 
   if (!rateLimit.allowed) {
-    res.setHeader('Retry-After', String(Math.ceil((rateLimit.resetAt - Date.now()) / 1000)));
     return res.status(429).json({ error: 'rate limit exceeded' });
   }
 
