@@ -1362,13 +1362,14 @@
       }
       // A `javascript:` URL in an iframe runs with this page's origin, so only
       // plain web URLs are ever framed.
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+      const href = parsed.href;
+      if (!/^https?:\/\//i.test(href)) return false;
 
       embedFrame.innerHTML = '';
       const frame = document.createElement('iframe');
       frame.allowFullscreen = true;
       frame.setAttribute('allow', 'autoplay');
-      frame.src = parsed.href;
+      frame.src = href;
       embedFrame.appendChild(frame);
       return true;
     }
@@ -1404,7 +1405,9 @@
         };
       }
 
-      thumbnail.src = url;
+      const safeThumb = Utils.safeMediaUrl(url);
+      if (!safeThumb) { thumbnail.classList.remove('visible'); return; }
+      thumbnail.src = safeThumb;
       thumbnail.classList.add('visible');
     }
 
@@ -1582,7 +1585,7 @@
       try {
         const resolver = new Resolver();
         const result = resolver.resolve(rawUrl);
-        const src = result.proxyRequired ? resolver.getProxyUrl(rawUrl) : rawUrl;
+        const src = Utils.safeMediaUrl(result.proxyRequired ? resolver.getProxyUrl(rawUrl) : rawUrl);
 
         if (isDebugMode) setStatus('Loading…');
 
@@ -1645,11 +1648,18 @@
           sendEmbedEvent('error', { message: msg || 'Media error' });
         };
 
+        if (!src) {
+          onError('Unsupported URL');
+          return;
+        }
+
         let fallbackIndex = 0;
 
         function loadNative(srcUrl) {
           const signal = listenerAbort ? listenerAbort.signal : undefined;
-          video.src = srcUrl;
+          const safeSrc = Utils.safeMediaUrl(srcUrl);
+          if (!safeSrc) { handleFailure('Unsupported URL'); return; }
+          video.src = safeSrc;
           video.addEventListener('loadedmetadata', onMediaReady, { once: true, signal });
           video.addEventListener('error', () => {
             if (!mediaReady) handleFailure('Failed to load media');

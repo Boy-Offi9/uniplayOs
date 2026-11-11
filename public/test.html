@@ -382,7 +382,12 @@
       const resolver = new Resolver();
       const result   = resolver.resolve(rawUrl);
       const ext      = Utils.getFileExtension(rawUrl);
-      const src      = result.proxyRequired ? resolver.getProxyUrl(rawUrl) : rawUrl;
+      const src      = Utils.safeMediaUrl(result.proxyRequired ? resolver.getProxyUrl(rawUrl) : rawUrl);
+
+      if (!src) {
+        log(`unsupported URL scheme — ${rawUrl}`, 'error');
+        return;
+      }
 
       rInput.textContent    = rawUrl;
       rExt.textContent      = ext || '—';

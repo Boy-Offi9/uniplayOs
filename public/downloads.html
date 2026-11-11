@@ -450,9 +450,12 @@
     preview.innerHTML = '';
     preview.classList.remove('visible');
 
+    const safeUrl = Utils.safeMediaUrl(url);
+    if (!safeUrl) return;
+
     if (type === 'mp4') {
       const video = document.createElement('video');
-      video.src = url;
+      video.src = safeUrl;
       video.controls = true;
       video.playsInline = true;
       video.preload = 'metadata';
@@ -460,13 +463,13 @@
       preview.classList.add('visible');
     } else if (type === 'image') {
       const img = document.createElement('img');
-      img.src = url;
+      img.src = safeUrl;
       img.alt = '';
       preview.appendChild(img);
       preview.classList.add('visible');
     } else if (type === 'audio') {
       const audio = document.createElement('audio');
-      audio.src = url;
+      audio.src = safeUrl;
       audio.controls = true;
       audio.style.width = '100%';
       audio.style.marginTop = '2.5rem';
