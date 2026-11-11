@@ -40,6 +40,7 @@ Video, audio, HLS, DASH, and embeds — through one resolver and proxy layer.
 uniplayos/
 ├── index.js              # Express server (exports the app for Vercel)
 ├── proxy.js              # SSRF-guarded proxy, manifest rewriting, cache
+├── rate-limit.js         # shared per-IP rate limiter (proxy + site)
 ├── embed.js              # drop-in embed script
 ├── embed.esm.js          # ES module wrapper around embed.js
 ├── package.json
@@ -95,6 +96,8 @@ All optional. Copy `.env.example` to `.env` and adjust as needed:
 | `CF_WORKER_URL`              | unset   | Route proxy requests through a Cloudflare Worker first (for IP-range blocks)                               |
 | `PROXY_RATE_LIMIT_MAX`       | `300`   | Max proxy requests per IP per window (HLS/DASH playback issues many requests)                              |
 | `PROXY_RATE_LIMIT_WINDOW_MS` | `60000` | Rate limit window, in milliseconds                                                                         |
+| `SITE_RATE_LIMIT_MAX`        | `600`   | Max requests per IP per window for everything except `/proxy` (static files, pages, embed scripts)         |
+| `SITE_RATE_LIMIT_WINDOW_MS`  | `60000` | Site rate limit window, in milliseconds                                                                    |
 | `PROXY_ALLOWED_HOSTS`        | unset   | Comma-separated host allowlist (e.g. `.example.com,cdn.example.org`). Leave empty to allow any public host |
 
 The SSRF guard (blocking private IPs, localhost, and cloud metadata endpoints) is always on and isn't configurable.
@@ -265,6 +268,18 @@ PRs welcome. Fork the repo, branch off `main`, and open a pull request describin
 - **Found a bug or have an idea?** [Open an issue](https://github.com/unitedevz/uniplayOs/issues/new/choose); the forms ask for the details that make it quick to fix.
 - **Found a security problem?** Please don't file a public issue. Follow [SECURITY.md](./SECURITY.md) and report it privately.
 
+## Lostboy Contribution
+
+Redesign of `public/index.html` — landing page only, no logic touched.
+
+- Rebuilt the layout with staggered entrance animations (`rise`, `underline`, `pulse` keyframes) instead of a static page, kept the exact same color tokens (`--bg`, `--accent`, `--muted`, etc.) so it still matches the player
+- Swapped every icon for Font Awesome (`fa-play`, `fa-flask`, `fa-file-video`, `fa-tower-broadcast`, `fa-diagram-project`, `fa-code`) — no emoji anywhere
+- Added a live status badge with a pulsing dot, a two-button hero (Launch Player / Try the Resolver), and a four-item capability grid (MP4/WebM, HLS, DASH, Embeddable)
+- Full responsive pass: 4-column feature grid collapses to 2 columns under 768px, action buttons stack full-width under 420px
+- Respects `prefers-reduced-motion` — animations and transitions drop out entirely for users who ask for it
+- Added proper SEO/meta: `<meta name="description">`, `<meta name="keywords">`, canonical link, Open Graph and Twitter card tags, and a `SoftwareApplication` JSON-LD block so the page is actually indexable and shareable
+- Added a subtle SVG-based noise texture and radial accent glows in the background for depth, all done in pure CSS, no extra image assets
+- Footer now links out to the GitHub repo instead of dead-ending
 
 ## License
 
