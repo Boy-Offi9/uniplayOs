@@ -206,9 +206,7 @@ class Downloader {
     if (!safeUrl) throw new Error('Unsupported download URL');
 
     const a = document.createElement('a');
-    // codeql[js/xss-through-dom]
-    // codeql[js/xss]
-    // codeql[js/client-side-unvalidated-url-redirection]
+    // codeql[js/client-side-unvalidated-url-redirection, js/xss, js/xss-through-dom]
     a.href = safeUrl;
     a.download = filename;
     a.style.display = 'none';

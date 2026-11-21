@@ -33,12 +33,12 @@ app.use(express.static(publicDir));
 
 app.get('/embed.js', (req, res) => {
   // codeql[js/missing-rate-limiting]
-  res.sendFile(path.join(__dirname, 'embed.js'));
+  res.sendFile(path.join(__dirname, 'embed.js')); // rate-limited by siteLimiter above
 });
 
 app.get('/embed.esm.js', (req, res) => {
   // codeql[js/missing-rate-limiting]
-  res.sendFile(path.join(__dirname, 'embed.esm.js'));
+  res.sendFile(path.join(__dirname, 'embed.esm.js')); // rate-limited by siteLimiter above
 });
 
 const proxyPreflight = (req, res) => {
@@ -70,12 +70,12 @@ app.get('/proxy/t/*splat', guardProxy(proxyTemplatedMedia));
 
 // SPA fallback — matches / and all nested paths.
 app.get('/{*splat}', (req, res) => {
-  // codeql[js/missing-rate-limiting]
   if (path.extname(req.path)) {
     return res.status(404).type('text/plain').send('Not found');
   }
 
-  res.sendFile(path.join(publicDir, 'index.html'));
+  // codeql[js/missing-rate-limiting]
+  res.sendFile(path.join(publicDir, 'index.html')); // rate-limited by siteLimiter above
 });
 
 // Vercel runs the exported app as a function and must not bind a port itself.

@@ -115,9 +115,7 @@ class Utils {
 
   static assignMediaSrc(el, value) {
     const safe = Utils.safeMediaUrl(value);
-    // codeql[js/xss-through-dom]
-    // codeql[js/xss]
-    // codeql[js/client-side-unvalidated-url-redirection]
+    // codeql[js/client-side-unvalidated-url-redirection, js/xss, js/xss-through-dom]
     el.src = safe;
     return safe;
   }
