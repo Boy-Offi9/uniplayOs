@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm test
+      - name: Smoke — server boots and proxy guards respond
+        run: |
+          node index.js &
+          SERVER_PID=$!
+          sleep 2
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/)
+          [ "$code" = "200" ] || { echo "index returned $code"; exit 1; }
+          curl -s "http://localhost:3000/proxy?url=http://127.0.0.1:3000/" | grep -q 'target host not allowed'
+          curl -s "http://localhost:3000/proxy?url=notaurl" | grep -q 'invalid url'
+          curl -sI "http://localhost:3000/proxy?url=https://example.com/x.m3u8" | head -1 | grep -q '200'
+          kill $SERVER_PID

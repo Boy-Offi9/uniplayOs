@@ -1,6 +1,6 @@
 {
   "name": "uniplayOs",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Universal media player engine with proxy and resolver layer",
   "main": "index.js",
   "type": "module",
@@ -10,7 +10,8 @@
   },
   "scripts": {
     "start": "node index.js",
-    "dev": "node --watch index.js"
+    "dev": "node --watch index.js",
+    "test": "node --test tests/"
   },
   "dependencies": {
     "cors": "^2.8.5",

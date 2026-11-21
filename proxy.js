@@ -435,6 +435,10 @@ function getCachedManifest(key) {
     manifestCache.delete(key);
     return null;
   }
+  // Touch on access so the eviction in setCachedManifest drops the
+  // least-recently used entry, not whichever was stored first.
+  manifestCache.delete(key);
+  manifestCache.set(key, entry);
   return entry;
 }
 
@@ -504,6 +508,16 @@ async function handleProxy(req, res, url) {
   }
 
   const proxyBase = `${req.protocol}://${req.get('host')}/proxy`;
+
+  // Players routinely probe media with HEAD before a GET. Running the full
+  // upstream fetch just to throw the body away wastes bandwidth on both sides;
+  // after URL validation and rate limiting, answer HEAD directly.
+  if (req.method === 'HEAD') {
+    applySafetyHeaders(res);
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    return res.status(200).end();
+  }
+
   const cacheKey = `${proxyBase}|${url}`;
 
   const cached = getCachedManifest(cacheKey);

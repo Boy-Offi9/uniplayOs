@@ -108,7 +108,7 @@ class Utils {
     const url = value.trim();
     if (/^https?:\/\//i.test(url)) return url;
     if (/^blob:/i.test(url)) return url;
-    if (/^data:(audio|video|image)\//i.test(url)) return url;
+    if (/^data:(audio|video|image)\/(?!svg)/i.test(url)) return url;
     if (/^\/(?!\/)/.test(url)) return url;
     return '';
   }
@@ -396,3 +396,5 @@ class Utils {
 if (typeof window !== 'undefined') {
   window.Utils = Utils;
 }
+
+export { Utils };

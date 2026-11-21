@@ -18,6 +18,10 @@ export function createRateLimiter({ max, windowMs, maxTrackedKeys = 5000 }) {
   function check(key) {
     const now = Date.now();
     const entry = hits.get(key);
+    // Touch on access: re-inserting the key moves it to the end of the Map's
+    // insertion order, so the eviction below always drops the least-recently
+    // used key instead of a currently active one that simply checked in early.
+    if (entry) hits.delete(key);
 
     if (!entry || now >= entry.resetAt) {
       if (hits.size >= maxTrackedKeys) {
@@ -34,6 +38,7 @@ export function createRateLimiter({ max, windowMs, maxTrackedKeys = 5000 }) {
     }
 
     entry.count += 1;
+    hits.set(key, entry);
     return { allowed: true, remaining: max - entry.count, resetAt: entry.resetAt };
   }
 
