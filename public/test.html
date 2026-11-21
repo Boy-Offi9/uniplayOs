@@ -270,8 +270,8 @@
     </div>
   </div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.7/hls.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/dashjs/4.7.4/dash.all.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.7/hls.min.js" integrity="sha512-d2LJXmb1f9rxipaqXL2Th9/uypFA0hcVVgKL7M/2klxaQBhmYySaZ/noWKLkAkjuBSw35F0noiiR1+QMz/QeKw==" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dashjs/4.7.4/dash.all.min.js" integrity="sha512-LyDgm9kfqyKlZOe+QjpNA6L/ZpcjNj+cKSJ/bQLTGkKXaxYNpYGN9Fe6DpI0H0w3Da2WcXVX8ACjL14y3iWGBQ==" crossorigin="anonymous"></script>
   <script src="https://www.youtube.com/iframe_api"></script>
   <script src="/js/utils/utils.js"></script>
   <script src="/js/utils/resolver.js"></script>
@@ -438,7 +438,7 @@
             log(`${data.type} — ${data.details}`, data.fatal ? 'error' : 'warn', 'HLS');
           });
         } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-          video.src = src;
+          Utils.assignMediaSrc(video, src);
           video.play();
           log('native HLS (Safari)', 'ok', 'HLS');
         } else {
@@ -451,7 +451,7 @@
         dashInstance.on(dashjs.MediaPlayer.events.ERROR, e => log(e.error?.message || 'error', 'error', 'DASH'));
         log('DASH player initialized', 'info', 'DASH');
       } else {
-        video.src = src;
+        Utils.assignMediaSrc(video, src);
         video.play();
         log(`direct src set — ${ext || 'unknown ext'}`, 'info', 'SRC');
       }

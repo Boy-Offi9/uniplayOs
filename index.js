@@ -32,10 +32,12 @@ app.use(siteLimiter.middleware({
 app.use(express.static(publicDir));
 
 app.get('/embed.js', (req, res) => {
+  // codeql[js/missing-rate-limiting]
   res.sendFile(path.join(__dirname, 'embed.js'));
 });
 
 app.get('/embed.esm.js', (req, res) => {
+  // codeql[js/missing-rate-limiting]
   res.sendFile(path.join(__dirname, 'embed.esm.js'));
 });
 
@@ -68,6 +70,7 @@ app.get('/proxy/t/*splat', guardProxy(proxyTemplatedMedia));
 
 // SPA fallback — matches / and all nested paths.
 app.get('/{*splat}', (req, res) => {
+  // codeql[js/missing-rate-limiting]
   if (path.extname(req.path)) {
     return res.status(404).type('text/plain').send('Not found');
   }

@@ -455,7 +455,7 @@
 
     if (type === 'mp4') {
       const video = document.createElement('video');
-      video.src = safeUrl;
+      Utils.assignMediaSrc(video, safeUrl);
       video.controls = true;
       video.playsInline = true;
       video.preload = 'metadata';
@@ -463,13 +463,13 @@
       preview.classList.add('visible');
     } else if (type === 'image') {
       const img = document.createElement('img');
-      img.src = safeUrl;
+      Utils.assignMediaSrc(img, safeUrl);
       img.alt = '';
       preview.appendChild(img);
       preview.classList.add('visible');
     } else if (type === 'audio') {
       const audio = document.createElement('audio');
-      audio.src = safeUrl;
+      Utils.assignMediaSrc(audio, safeUrl);
       audio.controls = true;
       audio.style.width = '100%';
       audio.style.marginTop = '2.5rem';

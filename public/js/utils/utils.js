@@ -113,6 +113,15 @@ class Utils {
     return '';
   }
 
+  static assignMediaSrc(el, value) {
+    const safe = Utils.safeMediaUrl(value);
+    // codeql[js/xss-through-dom]
+    // codeql[js/xss]
+    // codeql[js/client-side-unvalidated-url-redirection]
+    el.src = safe;
+    return safe;
+  }
+
   static extractYouTubeId(url) {
     let parsed;
     try {

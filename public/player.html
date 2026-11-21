@@ -762,8 +762,8 @@
   <div id="status">Ready</div>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.7/hls.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/dashjs/4.7.4/dash.all.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.7/hls.min.js" integrity="sha512-d2LJXmb1f9rxipaqXL2Th9/uypFA0hcVVgKL7M/2klxaQBhmYySaZ/noWKLkAkjuBSw35F0noiiR1+QMz/QeKw==" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dashjs/4.7.4/dash.all.min.js" integrity="sha512-LyDgm9kfqyKlZOe+QjpNA6L/ZpcjNj+cKSJ/bQLTGkKXaxYNpYGN9Fe6DpI0H0w3Da2WcXVX8ACjL14y3iWGBQ==" crossorigin="anonymous"></script>
 <script src="https://www.youtube.com/iframe_api"></script>
 <script src="https://player.vimeo.com/api/player.js"></script>
 <script src="/js/utils/utils.js"></script>
@@ -1659,7 +1659,7 @@
           const signal = listenerAbort ? listenerAbort.signal : undefined;
           const safeSrc = Utils.safeMediaUrl(srcUrl);
           if (!safeSrc) { handleFailure('Unsupported URL'); return; }
-          video.src = safeSrc;
+          Utils.assignMediaSrc(video, safeSrc);
           video.addEventListener('loadedmetadata', onMediaReady, { once: true, signal });
           video.addEventListener('error', () => {
             if (!mediaReady) handleFailure('Failed to load media');

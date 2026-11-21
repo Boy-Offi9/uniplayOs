@@ -194,6 +194,9 @@ async function fetchUpstream(startUrl, headers, signal) {
   let current = startUrl;
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    // Target is re-validated on every hop, including redirect hops: scheme
+    // allowlist, private-address DNS resolution and blocked-host checks.
+    // codeql[js/request-forgery]
     await assertSafeUrl(current);
 
     const target = CF_WORKER_URL
